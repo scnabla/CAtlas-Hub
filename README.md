@@ -1,5 +1,7 @@
 # CAtlas Hub
 
+[项目主页](https://github.com/scnabla/project-butler) · [版本下载](https://github.com/scnabla/project-butler/releases) · [问题反馈](https://github.com/scnabla/project-butler/issues)
+
 CAtlas Hub 是一个用于代码工程浏览与管理的 VS Code 插件，目前处于预览测试阶段。当前实现八类核心功能：
 
 1. 在插件内部按集合和别名管理、选择并打开多个独立项目。

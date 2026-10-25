@@ -6,13 +6,13 @@
   "publisher": "scnable",
   "license": "MIT",
   "icon": "media/catlas-hub.png",
-  "homepage": "https://github.com/scnable/project-butler#readme",
+  "homepage": "https://github.com/scnabla/project-butler#readme",
   "bugs": {
-    "url": "https://github.com/scnable/project-butler/issues"
+    "url": "https://github.com/scnabla/project-butler/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/scnable/project-butler.git"
+    "url": "https://github.com/scnabla/project-butler.git"
   },
   "engines": {
     "vscode": "^1.88.0"
