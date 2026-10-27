@@ -1,6 +1,6 @@
 # CAtlas Hub
 
-[项目主页](https://github.com/scnabla/project-butler) · [版本下载](https://github.com/scnabla/project-butler/releases) · [问题反馈](https://github.com/scnabla/project-butler/issues)
+[项目主页](https://github.com/scnabla/CAtlas-Hub) · [版本下载](https://github.com/scnabla/CAtlas-Hub/releases) · [问题反馈](https://github.com/scnabla/CAtlas-Hub/issues)
 
 CAtlas Hub 是一个用于代码工程浏览与管理的 VS Code 插件，支持 Windows 和 Linux。当前版本为 1.0.1，扩展 ID 为 `scnabla.catlas-hub`。提供八类核心功能：
 
@@ -13,7 +13,7 @@ CAtlas Hub 是一个用于代码工程浏览与管理的 VS Code 插件，支持
 7. 使用统一的领域图标区分项目、配置、文件边界和代码符号，并可即时切换到 VS Code 原生风格。
 8. 聚合当前文件或工作区中的代码 TODO，支持筛选、定位、关键词管理和快速标记。
 
-从 VS Code 扩展视图安装 `scnabla.catlas-hub`，或从[版本下载](https://github.com/scnabla/project-butler/releases)获取 VSIX，执行“从 VSIX 安装”。使用旧扩展 ID 的用户需安装新版并停用旧扩展；本版不自动导入旧扩展数据。
+从 VS Code 扩展视图安装 `scnabla.catlas-hub`，或从[版本下载](https://github.com/scnabla/CAtlas-Hub/releases)获取 VSIX，执行“从 VSIX 安装”。使用旧扩展 ID 的用户需安装新版并停用旧扩展；本版不自动导入旧扩展数据。
 
 ## 插件数据存储
 
