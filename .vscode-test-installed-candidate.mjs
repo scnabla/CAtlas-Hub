@@ -48,6 +48,7 @@ export const candidateConfig = {
     // 只在测试窗口禁用旧身份，不卸载旧包，也不修改用户日常启用状态。
     '--disable-extension', 'local-development.project-butler',
     '--disable-extension', 'scnable.catlas-hub',
+    '--disable-extension', 'scnabla.catlas-hub',
     '--disable-workspace-trust',
     '--skip-welcome',
     '--skip-release-notes',

@@ -6,7 +6,7 @@ import type { ProjectButlerApi } from '../testing/projectButlerApi';
 import { createStoredCatalog } from '../projectCatalog/catalogStore';
 
 export async function run(): Promise<void> {
-  const extension = vscode.extensions.getExtension<ProjectButlerApi>('scnabla.catlas-hub');
+  const extension = vscode.extensions.getExtension<ProjectButlerApi>('scnabla.catlas-hub-tools');
   assert.ok(extension);
   const api = await extension.activate(); await api.catalogs.initialization;
   assert.equal(api.context.extensionMode, vscode.ExtensionMode.Production);

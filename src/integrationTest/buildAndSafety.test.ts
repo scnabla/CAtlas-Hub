@@ -18,7 +18,7 @@ suite('构建、错误隔离、安全与性能', () => {
   });
 
   test('INT-156 Manifest 贡献命令与运行时命令一致', async () => {
-    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub-tools');
     assert.ok(extension);
     const contributed = (extension.packageJSON.contributes.commands as Array<{ command: string }>).map((item) => item.command);
     const runtime = new Set(await vscode.commands.getCommands(true));
@@ -89,7 +89,7 @@ suite('构建、错误隔离、安全与性能', () => {
   });
 
   test('INT-163 具有删除或重命名语义的命令均限定到安全对象', () => {
-    const extension = vscode.extensions.getExtension('scnabla.catlas-hub')!;
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub-tools')!;
     const commands = (extension.packageJSON.contributes.commands as Array<{ command: string }>).map((item) => item.command.toLocaleLowerCase());
     const allowedScopedMutationCommands = new Set([
       'projectmanager.renamecatalog',

@@ -39,7 +39,7 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
   test('INT-196 注册 TODO 视图、命令和配置分组', async () => {
     const api = await getApi();
     await api.todo.waitForIdleForIntegrationTest();
-    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub-tools');
     assert.ok(extension);
     const views = extension.packageJSON.contributes?.views as Record<string, Array<{ id?: string; visibility?: string }>>;
     const todoInExplorer = views.explorer?.filter((view) => view.id === 'projectManager.todoView') ?? [];

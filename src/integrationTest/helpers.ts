@@ -5,7 +5,7 @@ import * as sinon from 'sinon';
 import { CatalogLibrary, StoredProjectCatalog, createEmptyCatalogLibrary, createStoredCatalog, createStoredProject } from '../projectCatalog/catalogStore';
 import { ProjectButlerApi } from '../testing/projectButlerApi';
 
-const EXTENSION_ID = 'scnabla.catlas-hub';
+const EXTENSION_ID = 'scnabla.catlas-hub-tools';
 const LIBRARY_KEY = 'projectManager.catalogLibrary.v1';
 const ACTIVE_CATALOG_ID_KEY = 'projectManager.catalogLibrary.activeId';
 const LAST_ACTIVE_CATALOG_ID_KEY = 'projectManager.catalogLibrary.lastActiveId';

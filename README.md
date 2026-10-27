@@ -13,7 +13,7 @@ CAtlas Hub 是一款支持 Windows 和 Linux 的 VS Code 扩展，将项目集�
 
 ## 安装与开始使用
 
-需要 VS Code 1.88.0 或更新版本。扩展 ID 为 `scnabla.catlas-hub`。
+需要 VS Code 1.88.0 或更新版本。扩展 ID 为 `scnabla.catlas-hub-tools`。
 
 从[版本下载](https://github.com/scnabla/CAtlas-Hub/releases)获取 `.vsix` 安装包，在 VS Code 扩展视图右上角菜单中选择“从 VSIX 安装”，选中安装包并按提示完成安装。
 

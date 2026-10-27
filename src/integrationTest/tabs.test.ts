@@ -478,7 +478,7 @@ suite('标签页自动与手动整理', () => {
   });
 
   test('INT-191 标题栏只提供文字形式的隐藏原生视图操作', () => {
-    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub-tools');
     assert.ok(extension);
     const contributes = extension.packageJSON.contributes as {
       commands: Array<{ command: string; title: string; icon?: string }>;

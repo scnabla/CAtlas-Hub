@@ -47,7 +47,7 @@ suite('测试基础设施、上下文与项目集合生命周期', () => {
   test('INT-005 未加载非内置第三方扩展', () => {
     const builtinRoot = path.join(vscode.env.appRoot, 'extensions');
     const unexpected = vscode.extensions.all.filter((extension) => {
-      if (extension.id === 'scnabla.catlas-hub') return false;
+      if (extension.id === 'scnabla.catlas-hub-tools') return false;
       const relative = path.relative(builtinRoot, extension.extensionPath);
       return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
     });
@@ -56,14 +56,14 @@ suite('测试基础设施、上下文与项目集合生命周期', () => {
 
   test('INT-006 当前 VS Code 满足 engines.vscode', async () => {
     const api = await getApi();
-    const required = String(vscode.extensions.getExtension('scnabla.catlas-hub')?.packageJSON.engines.vscode);
+    const required = String(vscode.extensions.getExtension('scnabla.catlas-hub-tools')?.packageJSON.engines.vscode);
     assert.equal(required, '^1.88.0');
     assert.ok(Number(vscode.version.split('.')[0]) >= 1 && Number(vscode.version.split('.')[1]) >= 88);
     assert.notEqual(api.context.extensionMode, vscode.ExtensionMode.Production);
   });
 
   test('INT-007 Manifest 声明 onStartupFinished 自动激活', () => {
-    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub-tools');
     assert.ok(extension);
     assert.ok((extension.packageJSON.activationEvents as string[]).includes('onStartupFinished'));
     assert.equal(extension.isActive, true);

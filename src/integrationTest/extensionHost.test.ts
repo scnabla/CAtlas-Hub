@@ -5,7 +5,7 @@ import { applyPersonalSettingValue } from '../configuration/configurationTreePro
 import { detectVscodeCapabilities } from '../platform/vscodeCapabilities';
 import { closeAllEditors, getApi } from './helpers';
 
-const EXTENSION_ID = 'scnabla.catlas-hub';
+const EXTENSION_ID = 'scnabla.catlas-hub-tools';
 
 suite('CAtlas Hub Extension Host 集成测试', () => {
   suiteTeardown(async () => {
