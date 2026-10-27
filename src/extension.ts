@@ -5,6 +5,8 @@
  * 返回的 ProjectButlerApi 暴露实际运行实例供集成测试使用，修改注册顺序时也要检查测试调用。
  */
 import * as vscode from 'vscode';
+import { registerDataLocationCommand } from './configuration/dataLocationCommand';
+import { initializePersonalConfiguration } from './configuration/personalConfiguration';
 import { registerExcludeResourcesCommand } from './exclusions/excludeResourcesCommand';
 import { ExclusionServiceV2 } from './exclusions/exclusionServiceV2';
 import { registerManageExclusionsCommand } from './exclusions/manageExclusionsCommand';
@@ -16,10 +18,11 @@ import { registerOpenedFilesTree } from './tabManagement/registerOpenedFilesTree
 import { ProjectButlerApi } from './testing/projectButlerApi';
 import { registerTodo } from './todo/registerTodo';
 import { bindTodoFeatureConfigurationSource } from './todo/todoSettings';
-import { initializeIdentityMigration, registerIdentityMigration } from './migration/registerIdentityMigration';
 
 export async function activate(context: vscode.ExtensionContext): Promise<ProjectButlerApi> {
-  await initializeIdentityMigration(context);
+  const personal = await initializePersonalConfiguration(context);
+  context = personal.context;
+  context.subscriptions.push(registerDataLocationCommand(personal.store));
   const output = vscode.window.createOutputChannel('CAtlas Hub');
   const exclusionService = new ExclusionServiceV2(output, context.workspaceState);
   const externalFileMonitor = new ExternalFileMonitor(output);
@@ -40,7 +43,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Projec
   registerExcludeResourcesCommand(context, exclusionService, output);
   registerManageExclusionsCommand(context, exclusionService, output);
   const catalogs = registerProjectCatalogV2(context, output);
-  registerIdentityMigration(context, catalogs.initialization);
+  context.subscriptions.push(personal.store.onChange((before, after, external) => {
+    if (external && JSON.stringify(before.state['projectManager.catalogLibrary.v1']) !== JSON.stringify(after.state['projectManager.catalogLibrary.v1'])) {
+      void catalogs.initialization.then(() => catalogs.service.reloadPersonalLibrary())
+        .catch(() => output.appendLine('外部项目集合读取失败，请刷新后重试。'));
+    }
+  }));
   context.subscriptions.push(bindTodoFeatureConfigurationSource(catalogs.service));
   const tabs = registerTabManagement(context, output, catalogs.service);
   const openedFilesTree = registerOpenedFilesTree(context, output);
@@ -49,6 +57,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Projec
   output.appendLine('CAtlas Hub已激活。');
   return {
     context,
+    personalData: personal.store,
     output,
     exclusions: exclusionService,
     externalFiles: externalFileMonitor,

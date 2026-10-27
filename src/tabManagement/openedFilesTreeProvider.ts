@@ -1,3 +1,4 @@
+import { onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 把 VS Code 当前标签转换为文件描述，再交给 openedFilesTreeModel 生成目录结构。
  * 跳转需保留真实 URI 和编辑器组信息；目录压缩只是显示处理，不能据显示路径重新猜测文件地址。
@@ -11,7 +12,7 @@ import {
   OpenedFileDescriptor,
   OpenedFileTreeNode,
 } from './openedFilesTreeModel';
-import { createTreeIcon, createTreeIconPath, getConfiguredIconStyle } from '../visual/treeIconResources';
+import { createTreeIcon, createTreeIconPath, getConfiguredIconStyle, isHighContrastTheme } from '../visual/treeIconResources';
 import { getWorkspaceRelativePath } from '../shared/uri';
 
 export class OpenedFilesTreeProvider implements vscode.TreeDataProvider<OpenedFileTreeNode>, vscode.Disposable {
@@ -33,8 +34,9 @@ export class OpenedFilesTreeProvider implements vscode.TreeDataProvider<OpenedFi
       vscode.window.tabGroups.onDidChangeTabs(() => this.scheduleRefresh()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.scheduleRefresh()),
       vscode.window.onDidChangeActiveTextEditor(() => this.scheduleRefresh()),
+      vscode.window.onDidChangeActiveColorTheme(() => this.refresh()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.scheduleRefresh()),
-      vscode.workspace.onDidChangeConfiguration((event) => {
+      onDidChangePersonalConfiguration((event) => {
         if (event.affectsConfiguration('projectManager.visuals.iconStyle')) this.refresh();
       }),
     );
@@ -61,7 +63,7 @@ export class OpenedFilesTreeProvider implements vscode.TreeDataProvider<OpenedFi
     if (node.kind === 'file') {
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
       if (node.uri !== undefined) item.resourceUri = vscode.Uri.parse(node.uri);
-      if (this.extensionUri !== undefined && getConfiguredIconStyle() === 'unified') {
+      if (this.extensionUri !== undefined && getConfiguredIconStyle() === 'unified' && !isHighContrastTheme()) {
         item.iconPath = createTreeIconPath(
           this.extensionUri,
           node.external ? 'external-file' : 'file',
@@ -91,7 +93,7 @@ export class OpenedFilesTreeProvider implements vscode.TreeDataProvider<OpenedFi
     item.iconPath = node.kind === 'workspace'
       ? createTreeIcon(this.extensionUri, 'workspace', 'root-folder')
       : node.kind === 'externalGroup'
-        ? createTreeIcon(this.extensionUri, 'external-file', 'warning')
+        ? createTreeIcon(this.extensionUri, 'external-file', 'link-external')
         : new vscode.ThemeIcon(node.kind === 'group'
         ? 'layout'
         : 'folder');

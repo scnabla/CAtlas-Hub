@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as vscode from 'vscode';
 import { createTodoExcludeGlob } from './todoScanPlan';
 import { createTodoParseOptionsForPath, getTodoSettings } from './todoSettings';
@@ -17,8 +18,8 @@ export async function collectTodoInventory(token: vscode.CancellationToken, file
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     if (token.isCancellationRequested) return { stamps, complete: false };
     const exclude = createTodoExcludeGlob(
-      vscode.workspace.getConfiguration('files', folder.uri).get('exclude'),
-      vscode.workspace.getConfiguration('search', folder.uri).get('exclude'),
+      getPersonalConfiguration('files', folder.uri).get('exclude'),
+      getPersonalConfiguration('search', folder.uri).get('exclude'),
     );
     const files = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, '**/*'),
       new vscode.RelativePattern(folder, exclude), TODO_CACHE_MAX_FILES - discovered + 1, token);
@@ -49,8 +50,8 @@ export function todoCacheSignature(): string {
     project: settings.showProjectMarkers, locale: vscode.env.language,
     roots: (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
       uri: folder.uri.toString(),
-      files: ['exclude', 'encoding', 'associations'].map((key) => vscode.workspace.getConfiguration('files', folder.uri).get(key)),
-      search: vscode.workspace.getConfiguration('search', folder.uri).get('exclude'),
+      files: ['exclude', 'encoding', 'associations'].map((key) => getPersonalConfiguration('files', folder.uri).get(key)),
+      search: getPersonalConfiguration('search', folder.uri).get('exclude'),
     })),
   });
 }

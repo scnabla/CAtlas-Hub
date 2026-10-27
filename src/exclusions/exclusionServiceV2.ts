@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as path from 'node:path';
 /**
  * 屏蔽资源通过 VS Code 的文件、搜索和监听排除配置实现，不删除实际源码。
@@ -105,7 +106,7 @@ export class ExclusionServiceV2 {
     private readonly getConfiguration: (
       section: string,
       scope?: vscode.ConfigurationScope | null,
-    ) => vscode.WorkspaceConfiguration = (section, scope) => vscode.workspace.getConfiguration(section, scope),
+    ) => vscode.WorkspaceConfiguration = (section, scope) => getPersonalConfiguration(section, scope),
   ) {}
 
   public async exclude(resources: readonly vscode.Uri[]): Promise<ExclusionResult> {
@@ -253,8 +254,7 @@ export class ExclusionServiceV2 {
     if (allPatterns.length === 0) {
       return { typeCount: 0, settingEntryCount: 0, skippedCount, patterns: [] };
     }
-    const shouldConfirm = vscode.workspace
-      .getConfiguration('projectManager.exclusions')
+    const shouldConfirm = getPersonalConfiguration('projectManager.exclusions')
       .get<boolean>('confirmBeforeApply', true);
     if (shouldConfirm) {
       const choice = await vscode.window.showWarningMessage(
@@ -531,8 +531,7 @@ export class ExclusionServiceV2 {
   }
 
   private async confirmExclude(resourceCount: number): Promise<boolean> {
-    const shouldConfirm = vscode.workspace
-      .getConfiguration('projectManager.exclusions')
+    const shouldConfirm = getPersonalConfiguration('projectManager.exclusions')
       .get<boolean>('confirmBeforeApply', true);
     if (!shouldConfirm) {
       return true;
@@ -595,8 +594,7 @@ function getFolderSetting(
   if (target === undefined) {
     return {};
   }
-  return vscode.workspace
-    .getConfiguration(target.section, folder.uri)
+  return getPersonalConfiguration(target.section, folder.uri)
     .inspect<ExcludeSetting>(target.key)
     ?.workspaceFolderValue ?? {};
 }

@@ -23,3 +23,10 @@ AGENTS.md
 需求文档.md
 **/*.map
 **/*.test.js
+
+.vscode-test/**
+releases/**
+.nvmrc
+.editorconfig
+.gitattributes
+DEVELOPMENT.md

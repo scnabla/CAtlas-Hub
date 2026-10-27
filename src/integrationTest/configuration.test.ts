@@ -1,3 +1,5 @@
+import { PersonalDataStore } from '../storage/personalDataStore';
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import {
@@ -11,15 +13,47 @@ import { resolveVscodeCapabilities } from '../platform/vscodeCapabilitiesModel';
 import { detectVscodeCapabilities } from '../platform/vscodeCapabilities';
 import { getTodoSettings } from '../todo/todoSettings';
 import {
+  closeAllEditors,
   createCatalogForWorkspace,
   getApi,
   projectUri,
   resetCatalogs,
   seedCatalogs,
   setGlobalSetting,
+  waitUntil,
 } from './helpers';
 
 suite('配置侧栏、优先级与实时生效', () => {
+  test('INT-239 个人偏好与项目集合保存到独立文件且不改写 VS Code 用户设置', async () => {
+    const api = await getApi();
+    const nativeBefore = vscode.workspace.getConfiguration('projectManager.visuals').inspect('iconStyle')?.globalValue;
+    await applyPersonalSettingValue('iconStyle', 'native');
+    assert.equal(api.personalData.get('preferences', 'projectManager.visuals.iconStyle'), 'native');
+    assert.equal(vscode.workspace.getConfiguration('projectManager.visuals').inspect('iconStyle')?.globalValue, nativeBefore);
+    const catalog = createCatalogForWorkspace('外部存储验收');
+    await seedCatalogs(api, [catalog], catalog.id);
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(api.personalData.file));
+    const saved = JSON.parse(Buffer.from(bytes).toString('utf8'));
+    assert.equal(saved.state['projectManager.catalogLibrary.v1'].catalogs[0].name, '外部存储验收');
+    assert.equal(saved.preferences['projectManager.visuals.iconStyle'], 'native');
+    assert.equal(saved.state['projectManager.catalogLibrary.activeId'], undefined);
+    await applyPersonalSettingValue('iconStyle', 'unified');
+  });
+
+  test('INT-240 其他窗口保存个人配置和集合后当前窗口自动更新', async () => {
+    const api = await getApi();
+    await resetCatalogs(api);
+    const other = new PersonalDataStore(api.personalData.defaultFile);
+    await other.initialize();
+    try {
+      await other.update('preferences', 'projectManager.visuals.iconStyle', 'native');
+      await waitUntil(() => getPersonalConfiguration('projectManager.visuals').get('iconStyle') === 'native', '个人配置应自动同步');
+      const catalog = createCatalogForWorkspace('其他窗口集合');
+      await other.update('state', 'projectManager.catalogLibrary.v1', { storageVersion: 3, catalogs: [catalog] });
+      await waitUntil(() => api.catalogs.service.catalogs.some(item => item.id === catalog.id), '集合应自动同步');
+    } finally { other.dispose(); await applyPersonalSettingValue('iconStyle', 'unified'); await resetCatalogs(api); }
+  });
+
   suiteTeardown(async () => {
     const api = await getApi();
     await resetCatalogs(api);
@@ -35,12 +69,13 @@ suite('配置侧栏、优先级与实时生效', () => {
     assert.equal(roots.some((node) => node.kind === 'group' && node.id === 'collection'), true);
   });
 
-  test('INT-018 集合内项目显示集合名称和已应用上下文', async () => {
+  test('INT-018 集合内项目显示当前配置名称且不附加修订说明', async () => {
     const api = await getApi();
     const catalog = createCatalogForWorkspace('成员集合');
     await seedCatalogs(api, [catalog], catalog.id);
     const summary = api.catalogs.configurationProvider.getTreeItem(api.catalogs.configurationProvider.getChildren()[0] as ConfigurationTreeNode);
     assert.equal(summary.label, '当前配置：成员集合');
+    assert.equal(summary.description, undefined);
     assert.match(String(summary.tooltip), /属于该集合/);
   });
 
@@ -71,6 +106,29 @@ suite('配置侧栏、优先级与实时生效', () => {
       '工作区外文件提醒',
       '函数大纲显示',
     ]);
+  });
+
+  test('INT-236 独立配置入口打开用户 settings.json', async () => {
+    const api = await getApi();
+    await resetCatalogs(api);
+    const provider = api.catalogs.configurationProvider;
+    const node = provider.getChildren().find((candidate) => candidate.kind === 'settingsFile');
+    assert.ok(node, '未选择集合时仍应显示配置文件入口');
+    const item = provider.getTreeItem(node);
+    assert.equal(item.collapsibleState, vscode.TreeItemCollapsibleState.None);
+    assert.ok(item.command);
+    await closeAllEditors();
+    try {
+      await vscode.commands.executeCommand(item.command.command, ...(item.command.arguments ?? []));
+      await waitUntil(() => vscode.window.activeTextEditor?.document.uri.path.endsWith('/settings.json') === true,
+        '点击配置入口后未打开 settings.json');
+      const document = vscode.window.activeTextEditor!.document;
+      assert.equal(document.languageId, 'jsonc');
+      assert.equal(vscode.workspace.getWorkspaceFolder(document.uri), undefined, '入口应打开用户设置而非项目设置');
+      assert.equal(document.isDirty, false, '打开入口不应修改设置内容');
+    } finally {
+      await closeAllEditors();
+    }
   });
 
   test('INT-021 配置分组折叠状态可持久化并重建读取', async () => {
@@ -143,9 +201,9 @@ suite('配置侧栏、优先级与实时生效', () => {
     const todoGroup = api.catalogs.configurationProvider.getChildren()
       .find((node) => node.kind === 'group' && node.id === 'todo');
     assert.ok(todoGroup);
-    const todoDescriptions = api.catalogs.configurationProvider.getChildren(todoGroup)
-      .map((node) => String(api.catalogs.configurationProvider.getTreeItem(node).description));
-    assert.ok(todoDescriptions.filter((description) => description.includes('项目集合')).length >= 3);
+    const todoTooltips = api.catalogs.configurationProvider.getChildren(todoGroup)
+      .map((node) => String(api.catalogs.configurationProvider.getTreeItem(node).tooltip));
+    assert.ok(todoTooltips.filter((tooltip) => tooltip.includes('来源：项目集合')).length >= 3);
 
     await api.catalogs.service.updateCurrentTodoSetting('enabled', undefined, false);
     settings = getTodoSettings(api.catalogs.service.currentProjectTodoSettings);
@@ -184,7 +242,7 @@ suite('配置侧栏、优先级与实时生效', () => {
   test('INT-024 个人非项目标签自动移至末尾默认值写入用户作用域', async () => {
     const result = await applyPersonalSettingValue('tabDefault', true);
     assert.equal(result.globalValue, true);
-    assert.equal(vscode.workspace.getConfiguration('projectManager.tabs').inspect<boolean>('autoOrganize')?.globalValue, true);
+    assert.equal(getPersonalConfiguration('projectManager.tabs').inspect<boolean>('autoOrganize')?.globalValue, true);
     await applyPersonalSettingValue('tabDefault', false);
   });
 
@@ -214,7 +272,7 @@ suite('配置侧栏、优先级与实时生效', () => {
     const provider = new ConfigurationTreeProvider(api.catalogs.service, api.context.globalState, interaction(true, true));
     await provider.configurePersonalSetting('disableAiFeatures');
     provider.dispose();
-    assert.equal(vscode.workspace.getConfiguration('chat').inspect<boolean>('disableAIFeatures')?.globalValue, true);
+    assert.equal(getPersonalConfiguration('chat').inspect<boolean>('disableAIFeatures')?.globalValue, true);
   });
 
   test('INT-029 取消关闭内置 AI 不修改配置', async () => {
@@ -224,7 +282,7 @@ suite('配置侧栏、优先级与实时生效', () => {
     const provider = new ConfigurationTreeProvider(api.catalogs.service, api.context.globalState, interaction(true, false));
     await provider.configurePersonalSetting('disableAiFeatures');
     provider.dispose();
-    assert.equal(vscode.workspace.getConfiguration('chat').inspect<boolean>('disableAIFeatures')?.globalValue, false);
+    assert.equal(getPersonalConfiguration('chat').inspect<boolean>('disableAIFeatures')?.globalValue, false);
   });
 
   test('INT-030 从侧栏重新开启内置 AI', async () => {
@@ -234,7 +292,7 @@ suite('配置侧栏、优先级与实时生效', () => {
     const provider = new ConfigurationTreeProvider(api.catalogs.service, api.context.globalState, interaction(false, true));
     await provider.configurePersonalSetting('disableAiFeatures');
     provider.dispose();
-    assert.equal(vscode.workspace.getConfiguration('chat').inspect<boolean>('disableAIFeatures')?.globalValue, false);
+    assert.equal(getPersonalConfiguration('chat').inspect<boolean>('disableAIFeatures')?.globalValue, false);
   });
 
   test('INT-031 外部修改 AI 设置后配置树触发刷新', async () => {
@@ -283,12 +341,12 @@ suite('配置侧栏、优先级与实时生效', () => {
       const [, key, value, section, settingKey] = entry;
       const result = await applyPersonalSettingValue(key, value);
       assert.equal(result.globalValue, value);
-      assert.equal(vscode.workspace.getConfiguration(section).inspect(settingKey)?.globalValue, value);
+      assert.equal(getPersonalConfiguration(section).inspect(settingKey)?.globalValue, value);
     });
   }
 
   test('INT-041 已移除的签名显示选项不再注册', async () => {
-    const inspected = vscode.workspace.getConfiguration('projectManager.symbolOutline').inspect('showSignature');
+    const inspected = getPersonalConfiguration('projectManager.symbolOutline').inspect('showSignature');
     assert.equal(inspected?.defaultValue, undefined);
     const api = await getApi();
     const group = api.catalogs.configurationProvider.getChildren()
@@ -316,17 +374,17 @@ suite('配置侧栏、优先级与实时生效', () => {
   test('INT-047 VS Code 配置检查结果体现工作区高于用户级', async () => {
     if (await verifyUnavailableAi()) return;
     await setGlobalSetting('chat', 'disableAIFeatures', true);
-    const inspected = vscode.workspace.getConfiguration('chat').inspect<boolean>('disableAIFeatures');
+    const inspected = getPersonalConfiguration('chat').inspect<boolean>('disableAIFeatures');
     assert.equal(inspected?.globalValue, true);
     assert.equal(inspected?.workspaceValue, false);
-    assert.equal(vscode.workspace.getConfiguration('chat').get<boolean>('disableAIFeatures'), false);
+    assert.equal(getPersonalConfiguration('chat').get<boolean>('disableAIFeatures'), false);
     await setGlobalSetting('chat', 'disableAIFeatures', false);
   });
 
   test('INT-048 无效配置值被拒绝并保留上一有效值', async () => {
     await applyPersonalSettingValue('outlineScale', 100);
     await assert.rejects(() => applyPersonalSettingValue('outlineScale', 999), /不支持值/);
-    assert.equal(vscode.workspace.getConfiguration('projectManager.symbolOutline').inspect<number>('scale')?.globalValue, 100);
+    assert.equal(getPersonalConfiguration('projectManager.symbolOutline').inspect<number>('scale')?.globalValue, 100);
   });
 
   test('INT-049 取消配置选择器不会改变值', async () => {
@@ -335,7 +393,7 @@ suite('配置侧栏、优先级与实时生效', () => {
     const provider = new ConfigurationTreeProvider(api.catalogs.service, api.context.globalState, interaction(undefined, true));
     await provider.configurePersonalSetting('externalBadge');
     provider.dispose();
-    assert.equal(vscode.workspace.getConfiguration('projectManager.externalFiles').inspect<boolean>('showBadge')?.globalValue, true);
+    assert.equal(getPersonalConfiguration('projectManager.externalFiles').inspect<boolean>('showBadge')?.globalValue, true);
   });
 
   test('INT-050 配置值在 Provider 重建后保持', async () => {
@@ -420,7 +478,7 @@ suite('配置侧栏、优先级与实时生效', () => {
 async function verifyUnavailableAi(): Promise<boolean> {
   if (detectVscodeCapabilities().chatDisableAiFeatures.supported) return false;
   const api = await getApi();
-  const before = vscode.workspace.getConfiguration('chat').inspect('disableAIFeatures');
+  const before = getPersonalConfiguration('chat').inspect('disableAIFeatures');
   let warnings = 0;
   const provider = new ConfigurationTreeProvider(api.catalogs.service, api.context.globalState, {
     async choose() { assert.fail('不支持 AI 设置时不得进入选择流程'); },
@@ -438,7 +496,7 @@ async function verifyUnavailableAi(): Promise<boolean> {
     await provider.configurePersonalSetting('disableAiFeatures');
     assert.equal(warnings, 1);
     await assert.rejects(() => applyPersonalSettingValue('disableAiFeatures', true), /未注册 chat\.disableAIFeatures/);
-    assert.deepEqual(vscode.workspace.getConfiguration('chat').inspect('disableAIFeatures'), before);
+    assert.deepEqual(getPersonalConfiguration('chat').inspect('disableAIFeatures'), before);
   } finally { provider.dispose(); }
   return true;
 }

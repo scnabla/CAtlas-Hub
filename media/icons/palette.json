@@ -1,6 +1,11 @@
 {
-  "version": 1,
-  "tokens": ["primary", "surface", "secondary", "accent"],
+  "version": 3,
+  "tokens": [
+    "primary",
+    "surface",
+    "secondary",
+    "accent"
+  ],
   "modes": {
     "monochrome": {
       "*": {
@@ -11,94 +16,500 @@
       }
     },
     "light": {
-      "product": { "primary": "#246FDB", "surface": "#EAF3FF", "secondary": "#0F9D8A", "accent": "#F2A93B" },
-      "project": { "primary": "#B47700", "surface": "#FFF0C2", "secondary": "#246FDB", "accent": "#0F9D8A" },
-      "file": { "primary": "#246FDB", "surface": "#EAF3FF", "secondary": "#0F9D8A", "accent": "#F2A93B" },
-      "symbol-function": { "primary": "#087EA4", "surface": "#DDF6FF", "secondary": "#087EA4", "accent": "#087EA4" },
-      "symbol-method": { "primary": "#087EA4", "surface": "#DDF6FF", "secondary": "#087EA4", "accent": "#087EA4" },
-      "symbol-class": { "primary": "#7A48A8", "surface": "none", "secondary": "#7A48A8", "accent": "#7A48A8" },
-      "symbol-generic": { "primary": "#607080", "surface": "none", "secondary": "#607080", "accent": "#607080" },
-      "catalog": { "primary": "#B47700", "surface": "#FFF0C2", "secondary": "#E58A22", "accent": "#B47700" },
-      "workspace": { "primary": "#7455C3", "surface": "#F1EDFF", "secondary": "#8C63CE", "accent": "#7455C3" },
-      "config": { "primary": "#607080", "surface": "#FFFFFF", "secondary": "#246FDB", "accent": "#E58A22" },
-      "preferences": { "primary": "#246FDB", "surface": "#EAF3FF", "secondary": "#7455C3", "accent": "#0F9D8A" },
-      "resources": { "primary": "#246FDB", "surface": "#EAF3FF", "secondary": "#0F9D8A", "accent": "#E58A22" },
-      "external-file": { "primary": "#607080", "surface": "#F4F6F8", "secondary": "#246FDB", "accent": "#D14343" },
-      "context-member": { "primary": "#246FDB", "surface": "#EAF3FF", "secondary": "#0F9D8A", "accent": "#FFFFFF" },
-      "context-external": { "primary": "#607080", "surface": "#F4F6F8", "secondary": "#D9DEE3", "accent": "#D14343" },
-      "project-warning": { "primary": "#B47700", "surface": "#FFF0C2", "secondary": "#246FDB", "accent": "#D14343" },
-      "workspace-warning": { "primary": "#7455C3", "surface": "#F1EDFF", "secondary": "#246FDB", "accent": "#D14343" },
-      "symbol-file": { "primary": "#2F6DA8", "surface": "none", "secondary": "#2F6DA8", "accent": "#2F6DA8" },
-      "symbol-module": { "primary": "#2F6DA8", "surface": "none", "secondary": "#2F6DA8", "accent": "#2F6DA8" },
-      "symbol-namespace": { "primary": "#2F6DA8", "surface": "none", "secondary": "#2F6DA8", "accent": "#2F6DA8" },
-      "symbol-package": { "primary": "#2F6DA8", "surface": "none", "secondary": "#2F6DA8", "accent": "#2F6DA8" },
-      "symbol-property": { "primary": "#17805C", "surface": "none", "secondary": "#17805C", "accent": "#17805C" },
-      "symbol-field": { "primary": "#17805C", "surface": "none", "secondary": "#17805C", "accent": "#17805C" },
-      "symbol-constructor": { "primary": "#087EA4", "surface": "#DDF6FF", "secondary": "#087EA4", "accent": "#087EA4" },
-      "symbol-enum": { "primary": "#7A48A8", "surface": "none", "secondary": "#7A48A8", "accent": "#7A48A8" },
-      "symbol-interface": { "primary": "#7A48A8", "surface": "none", "secondary": "#7A48A8", "accent": "#7A48A8" },
-      "symbol-variable": { "primary": "#17805C", "surface": "none", "secondary": "#17805C", "accent": "#17805C" },
-      "symbol-constant": { "primary": "#A15C00", "surface": "none", "secondary": "#A15C00", "accent": "#A15C00" },
-      "symbol-string": { "primary": "#17805C", "surface": "none", "secondary": "#17805C", "accent": "#17805C" },
-      "symbol-number": { "primary": "#2F6DA8", "surface": "none", "secondary": "#2F6DA8", "accent": "#2F6DA8" },
-      "symbol-boolean": { "primary": "#17805C", "surface": "none", "secondary": "#17805C", "accent": "#17805C" },
-      "symbol-array": { "primary": "#2F6DA8", "surface": "none", "secondary": "#2F6DA8", "accent": "#2F6DA8" },
-      "symbol-object": { "primary": "#2F6DA8", "surface": "none", "secondary": "#2F6DA8", "accent": "#2F6DA8" },
-      "symbol-key": { "primary": "#A15C00", "surface": "none", "secondary": "#A15C00", "accent": "#A15C00" },
-      "symbol-null": { "primary": "#607080", "surface": "none", "secondary": "#607080", "accent": "#607080" },
-      "symbol-enum-member": { "primary": "#17805C", "surface": "none", "secondary": "#17805C", "accent": "#17805C" },
-      "symbol-struct": { "primary": "#7A48A8", "surface": "none", "secondary": "#7A48A8", "accent": "#7A48A8" },
-      "symbol-event": { "primary": "#C45E12", "surface": "none", "secondary": "#C45E12", "accent": "#C45E12" },
-      "symbol-operator": { "primary": "#607080", "surface": "none", "secondary": "#607080", "accent": "#607080" },
-      "symbol-type-parameter": { "primary": "#7A48A8", "surface": "none", "secondary": "#7A48A8", "accent": "#7A48A8" },
-      "symbol-preprocessor-region": { "primary": "#B47700", "surface": "none", "secondary": "#B47700", "accent": "#B47700" },
-      "symbol-preprocessor-branch": { "primary": "#B47700", "surface": "none", "secondary": "#B47700", "accent": "#B47700" },
-      "symbol-macro-definition": { "primary": "#C43D3D", "surface": "none", "secondary": "#C43D3D", "accent": "#C43D3D" }
+      "product": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#00838F",
+        "accent": "#1976D2"
+      },
+      "file": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "resources": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "preferences": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#00838F",
+        "accent": "#1976D2"
+      },
+      "context-member": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#00838F",
+        "accent": "#1976D2"
+      },
+      "symbol-property": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "symbol-field": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "symbol-variable": {
+        "primary": "#7E57C2",
+        "surface": "none",
+        "secondary": "#7E57C2",
+        "accent": "#7E57C2"
+      },
+      "symbol-enum-member": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "symbol-number": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "symbol-array": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "symbol-object": {
+        "primary": "#1976D2",
+        "surface": "none",
+        "secondary": "#1976D2",
+        "accent": "#1976D2"
+      },
+      "project": {
+        "primary": "#9A6700",
+        "surface": "none",
+        "secondary": "#9A6700",
+        "accent": "#9A6700"
+      },
+      "catalog": {
+        "primary": "#9A6700",
+        "surface": "none",
+        "secondary": "#9A6700",
+        "accent": "#9A6700"
+      },
+      "project-warning": {
+        "primary": "#9A6700",
+        "surface": "none",
+        "secondary": "#9A6700",
+        "accent": "#C62828"
+      },
+      "symbol-constant": {
+        "primary": "#9A6700",
+        "surface": "none",
+        "secondary": "#9A6700",
+        "accent": "#9A6700"
+      },
+      "symbol-key": {
+        "primary": "#9A6700",
+        "surface": "none",
+        "secondary": "#9A6700",
+        "accent": "#9A6700"
+      },
+      "workspace": {
+        "primary": "#7E57C2",
+        "surface": "none",
+        "secondary": "#7E57C2",
+        "accent": "#7E57C2"
+      },
+      "workspace-warning": {
+        "primary": "#7E57C2",
+        "surface": "none",
+        "secondary": "#7E57C2",
+        "accent": "#C62828"
+      },
+      "symbol-function": {
+        "primary": "#7E57C2",
+        "surface": "none",
+        "secondary": "#7E57C2",
+        "accent": "#7E57C2"
+      },
+      "symbol-method": {
+        "primary": "#7E57C2",
+        "surface": "none",
+        "secondary": "#7E57C2",
+        "accent": "#7E57C2"
+      },
+      "symbol-constructor": {
+        "primary": "#7E57C2",
+        "surface": "none",
+        "secondary": "#7E57C2",
+        "accent": "#7E57C2"
+      },
+      "symbol-class": {
+        "primary": "#B45309",
+        "surface": "none",
+        "secondary": "#B45309",
+        "accent": "#B45309"
+      },
+      "symbol-interface": {
+        "primary": "#B45309",
+        "surface": "none",
+        "secondary": "#B45309",
+        "accent": "#B45309"
+      },
+      "symbol-struct": {
+        "primary": "#B45309",
+        "surface": "none",
+        "secondary": "#B45309",
+        "accent": "#B45309"
+      },
+      "symbol-enum": {
+        "primary": "#B45309",
+        "surface": "none",
+        "secondary": "#B45309",
+        "accent": "#B45309"
+      },
+      "symbol-type-parameter": {
+        "primary": "#B45309",
+        "surface": "none",
+        "secondary": "#B45309",
+        "accent": "#B45309"
+      },
+      "symbol-event": {
+        "primary": "#B45309",
+        "surface": "none",
+        "secondary": "#B45309",
+        "accent": "#B45309"
+      },
+      "symbol-string": {
+        "primary": "#388E3C",
+        "surface": "none",
+        "secondary": "#388E3C",
+        "accent": "#388E3C"
+      },
+      "config": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "external-file": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "context-external": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-generic": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-file": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-module": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-namespace": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-package": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-null": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-operator": {
+        "primary": "#546E7A",
+        "surface": "none",
+        "secondary": "#546E7A",
+        "accent": "#546E7A"
+      },
+      "symbol-boolean": {
+        "primary": "#00838F",
+        "surface": "none",
+        "secondary": "#00838F",
+        "accent": "#00838F"
+      },
+      "symbol-macro-definition": {
+        "primary": "#AD1457",
+        "surface": "none",
+        "secondary": "#AD1457",
+        "accent": "#AD1457"
+      }
     },
     "dark": {
-      "product": { "primary": "#62A6FF", "surface": "#173B63", "secondary": "#48D1BA", "accent": "#FFC45B" },
-      "project": { "primary": "#FFD166", "surface": "#4B3813", "secondary": "#62A6FF", "accent": "#48D1BA" },
-      "file": { "primary": "#62A6FF", "surface": "#173B63", "secondary": "#48D1BA", "accent": "#FFC45B" },
-      "symbol-function": { "primary": "#4CC9F0", "surface": "#123D4A", "secondary": "#4CC9F0", "accent": "#4CC9F0" },
-      "symbol-method": { "primary": "#4CC9F0", "surface": "#123D4A", "secondary": "#4CC9F0", "accent": "#4CC9F0" },
-      "symbol-class": { "primary": "#C09AEB", "surface": "none", "secondary": "#C09AEB", "accent": "#C09AEB" },
-      "symbol-generic": { "primary": "#AAB8C5", "surface": "none", "secondary": "#AAB8C5", "accent": "#AAB8C5" },
-      "catalog": { "primary": "#FFD166", "surface": "#4B3813", "secondary": "#FFAD5C", "accent": "#FFD166" },
-      "workspace": { "primary": "#B69CFF", "surface": "#302653", "secondary": "#C1A5FF", "accent": "#B69CFF" },
-      "config": { "primary": "#AAB8C5", "surface": "#1E252B", "secondary": "#62A6FF", "accent": "#FFAD5C" },
-      "preferences": { "primary": "#62A6FF", "surface": "#173B63", "secondary": "#B69CFF", "accent": "#48D1BA" },
-      "resources": { "primary": "#62A6FF", "surface": "#173B63", "secondary": "#48D1BA", "accent": "#FFAD5C" },
-      "external-file": { "primary": "#AAB8C5", "surface": "#252C33", "secondary": "#62A6FF", "accent": "#FF6B6B" },
-      "context-member": { "primary": "#62A6FF", "surface": "#173B63", "secondary": "#48D1BA", "accent": "#142E2A" },
-      "context-external": { "primary": "#AAB8C5", "surface": "#252C33", "secondary": "#4A5560", "accent": "#FF6B6B" },
-      "project-warning": { "primary": "#FFD166", "surface": "#4B3813", "secondary": "#62A6FF", "accent": "#FF6B6B" },
-      "workspace-warning": { "primary": "#B69CFF", "surface": "#302653", "secondary": "#62A6FF", "accent": "#FF6B6B" },
-      "symbol-file": { "primary": "#6EA8E0", "surface": "none", "secondary": "#6EA8E0", "accent": "#6EA8E0" },
-      "symbol-module": { "primary": "#6EA8E0", "surface": "none", "secondary": "#6EA8E0", "accent": "#6EA8E0" },
-      "symbol-namespace": { "primary": "#6EA8E0", "surface": "none", "secondary": "#6EA8E0", "accent": "#6EA8E0" },
-      "symbol-package": { "primary": "#6EA8E0", "surface": "none", "secondary": "#6EA8E0", "accent": "#6EA8E0" },
-      "symbol-property": { "primary": "#5ED0A3", "surface": "none", "secondary": "#5ED0A3", "accent": "#5ED0A3" },
-      "symbol-field": { "primary": "#5ED0A3", "surface": "none", "secondary": "#5ED0A3", "accent": "#5ED0A3" },
-      "symbol-constructor": { "primary": "#4CC9F0", "surface": "#123D4A", "secondary": "#4CC9F0", "accent": "#4CC9F0" },
-      "symbol-enum": { "primary": "#C09AEB", "surface": "none", "secondary": "#C09AEB", "accent": "#C09AEB" },
-      "symbol-interface": { "primary": "#C09AEB", "surface": "none", "secondary": "#C09AEB", "accent": "#C09AEB" },
-      "symbol-variable": { "primary": "#5ED0A3", "surface": "none", "secondary": "#5ED0A3", "accent": "#5ED0A3" },
-      "symbol-constant": { "primary": "#F0B65A", "surface": "none", "secondary": "#F0B65A", "accent": "#F0B65A" },
-      "symbol-string": { "primary": "#5ED0A3", "surface": "none", "secondary": "#5ED0A3", "accent": "#5ED0A3" },
-      "symbol-number": { "primary": "#6EA8E0", "surface": "none", "secondary": "#6EA8E0", "accent": "#6EA8E0" },
-      "symbol-boolean": { "primary": "#5ED0A3", "surface": "none", "secondary": "#5ED0A3", "accent": "#5ED0A3" },
-      "symbol-array": { "primary": "#6EA8E0", "surface": "none", "secondary": "#6EA8E0", "accent": "#6EA8E0" },
-      "symbol-object": { "primary": "#6EA8E0", "surface": "none", "secondary": "#6EA8E0", "accent": "#6EA8E0" },
-      "symbol-key": { "primary": "#F0B65A", "surface": "none", "secondary": "#F0B65A", "accent": "#F0B65A" },
-      "symbol-null": { "primary": "#AAB8C5", "surface": "none", "secondary": "#AAB8C5", "accent": "#AAB8C5" },
-      "symbol-enum-member": { "primary": "#5ED0A3", "surface": "none", "secondary": "#5ED0A3", "accent": "#5ED0A3" },
-      "symbol-struct": { "primary": "#C09AEB", "surface": "none", "secondary": "#C09AEB", "accent": "#C09AEB" },
-      "symbol-event": { "primary": "#FFAD5C", "surface": "none", "secondary": "#FFAD5C", "accent": "#FFAD5C" },
-      "symbol-operator": { "primary": "#AAB8C5", "surface": "none", "secondary": "#AAB8C5", "accent": "#AAB8C5" },
-      "symbol-type-parameter": { "primary": "#C09AEB", "surface": "none", "secondary": "#C09AEB", "accent": "#C09AEB" },
-      "symbol-preprocessor-region": { "primary": "#FFD166", "surface": "none", "secondary": "#FFD166", "accent": "#FFD166" },
-      "symbol-preprocessor-branch": { "primary": "#FFD166", "surface": "none", "secondary": "#FFD166", "accent": "#FFD166" },
-      "symbol-macro-definition": { "primary": "#FF6B6B", "surface": "none", "secondary": "#FF6B6B", "accent": "#FF6B6B" }
+      "product": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#4DD0E1",
+        "accent": "#64B5F6"
+      },
+      "file": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "resources": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "preferences": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#4DD0E1",
+        "accent": "#64B5F6"
+      },
+      "context-member": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#4DD0E1",
+        "accent": "#64B5F6"
+      },
+      "symbol-property": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "symbol-field": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "symbol-variable": {
+        "primary": "#B39DDB",
+        "surface": "none",
+        "secondary": "#B39DDB",
+        "accent": "#B39DDB"
+      },
+      "symbol-enum-member": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "symbol-number": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "symbol-array": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "symbol-object": {
+        "primary": "#64B5F6",
+        "surface": "none",
+        "secondary": "#64B5F6",
+        "accent": "#64B5F6"
+      },
+      "project": {
+        "primary": "#FFCA28",
+        "surface": "none",
+        "secondary": "#FFCA28",
+        "accent": "#FFCA28"
+      },
+      "catalog": {
+        "primary": "#FFCA28",
+        "surface": "none",
+        "secondary": "#FFCA28",
+        "accent": "#FFCA28"
+      },
+      "project-warning": {
+        "primary": "#FFCA28",
+        "surface": "none",
+        "secondary": "#FFCA28",
+        "accent": "#EF9A9A"
+      },
+      "symbol-constant": {
+        "primary": "#FFCA28",
+        "surface": "none",
+        "secondary": "#FFCA28",
+        "accent": "#FFCA28"
+      },
+      "symbol-key": {
+        "primary": "#FFCA28",
+        "surface": "none",
+        "secondary": "#FFCA28",
+        "accent": "#FFCA28"
+      },
+      "workspace": {
+        "primary": "#B39DDB",
+        "surface": "none",
+        "secondary": "#B39DDB",
+        "accent": "#B39DDB"
+      },
+      "workspace-warning": {
+        "primary": "#B39DDB",
+        "surface": "none",
+        "secondary": "#B39DDB",
+        "accent": "#EF9A9A"
+      },
+      "symbol-function": {
+        "primary": "#B39DDB",
+        "surface": "none",
+        "secondary": "#B39DDB",
+        "accent": "#B39DDB"
+      },
+      "symbol-method": {
+        "primary": "#B39DDB",
+        "surface": "none",
+        "secondary": "#B39DDB",
+        "accent": "#B39DDB"
+      },
+      "symbol-constructor": {
+        "primary": "#B39DDB",
+        "surface": "none",
+        "secondary": "#B39DDB",
+        "accent": "#B39DDB"
+      },
+      "symbol-class": {
+        "primary": "#FFB74D",
+        "surface": "none",
+        "secondary": "#FFB74D",
+        "accent": "#FFB74D"
+      },
+      "symbol-interface": {
+        "primary": "#FFB74D",
+        "surface": "none",
+        "secondary": "#FFB74D",
+        "accent": "#FFB74D"
+      },
+      "symbol-struct": {
+        "primary": "#FFB74D",
+        "surface": "none",
+        "secondary": "#FFB74D",
+        "accent": "#FFB74D"
+      },
+      "symbol-enum": {
+        "primary": "#FFB74D",
+        "surface": "none",
+        "secondary": "#FFB74D",
+        "accent": "#FFB74D"
+      },
+      "symbol-type-parameter": {
+        "primary": "#FFB74D",
+        "surface": "none",
+        "secondary": "#FFB74D",
+        "accent": "#FFB74D"
+      },
+      "symbol-event": {
+        "primary": "#FFB74D",
+        "surface": "none",
+        "secondary": "#FFB74D",
+        "accent": "#FFB74D"
+      },
+      "symbol-string": {
+        "primary": "#81C784",
+        "surface": "none",
+        "secondary": "#81C784",
+        "accent": "#81C784"
+      },
+      "config": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "external-file": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "context-external": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-generic": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-file": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-module": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-namespace": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-package": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-null": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-operator": {
+        "primary": "#B0BEC5",
+        "surface": "none",
+        "secondary": "#B0BEC5",
+        "accent": "#B0BEC5"
+      },
+      "symbol-boolean": {
+        "primary": "#4DD0E1",
+        "surface": "none",
+        "secondary": "#4DD0E1",
+        "accent": "#4DD0E1"
+      },
+      "symbol-macro-definition": {
+        "primary": "#F48FB1",
+        "surface": "none",
+        "secondary": "#F48FB1",
+        "accent": "#F48FB1"
+      }
     }
   }
 }

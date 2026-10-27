@@ -1,10 +1,11 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import * as sinon from 'sinon';
 import { CatalogLibrary, StoredProjectCatalog, createEmptyCatalogLibrary, createStoredCatalog, createStoredProject } from '../projectCatalog/catalogStore';
 import { ProjectButlerApi } from '../testing/projectButlerApi';
 
-const EXTENSION_ID = 'scnable.catlas-hub';
+const EXTENSION_ID = 'scnabla.catlas-hub';
 const LIBRARY_KEY = 'projectManager.catalogLibrary.v1';
 const ACTIVE_CATALOG_ID_KEY = 'projectManager.catalogLibrary.activeId';
 const LAST_ACTIVE_CATALOG_ID_KEY = 'projectManager.catalogLibrary.lastActiveId';
@@ -89,11 +90,11 @@ export async function resetCatalogs(api: ProjectButlerApi): Promise<void> {
 }
 
 export async function setGlobalSetting(section: string, key: string, value: unknown): Promise<void> {
-  await vscode.workspace.getConfiguration(section).update(key, value, vscode.ConfigurationTarget.Global);
+  await getPersonalConfiguration(section).update(key, value, vscode.ConfigurationTarget.Global);
 }
 
 export async function setWorkspaceSetting(section: string, key: string, value: unknown): Promise<void> {
-  await vscode.workspace.getConfiguration(section).update(key, value, vscode.ConfigurationTarget.Workspace);
+  await getPersonalConfiguration(section).update(key, value, vscode.ConfigurationTarget.Workspace);
 }
 
 export async function closeAllEditors(): Promise<void> {

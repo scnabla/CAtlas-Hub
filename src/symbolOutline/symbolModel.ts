@@ -128,14 +128,16 @@ export function projectSymbols(
 
   if (options.hierarchy === 'flat') {
     return flattenSymbols(symbols)
-      .filter((symbol) => isAllowedByScope(symbol, options.scope))
+      .filter((symbol) => isAllowedByScope(symbol, options.scope)
+        || matchesPreprocessorQuery(symbol, query, options.locale))
       .filter((symbol) => query.length === 0 || matchesQuery(symbol, query, options.locale))
       .map((symbol) => ({ ...symbol, isContext: false, children: [] }))
       .sort(compare);
   }
 
   const visit = (symbol: OutlineSymbol): OutlineSymbol | undefined => {
-    const allowed = isAllowedByScope(symbol, options.scope);
+    const allowed = isAllowedByScope(symbol, options.scope)
+      || matchesPreprocessorQuery(symbol, query, options.locale);
     const selfMatches = query.length === 0 || matchesQuery(symbol, query, options.locale);
     const children = symbol.children
       .map(visit)
@@ -228,6 +230,12 @@ function isAllowedByScope(symbol: OutlineSymbol, scope: OutlineScope): boolean {
     || DEFAULT_SCOPE_EXTRA_KINDS.has(symbol.kind);
 }
 
+function matchesPreprocessorQuery(symbol: OutlineSymbol, query: string, locale: string): boolean {
+  return query.length > 0
+    && (symbol.kind === 'PreprocessorRegion' || symbol.kind === 'PreprocessorBranch')
+    && symbol.name.toLocaleLowerCase(locale).includes(query);
+}
+
 function matchesQuery(symbol: OutlineSymbol, query: string, locale: string): boolean {
   return [symbol.name, symbol.detail, symbol.containerName, symbol.parentPath]
     .some((value) => value.toLocaleLowerCase(locale).includes(query));
@@ -274,4 +282,13 @@ function comparePosition(left: OutlinePosition, right: OutlinePosition): number 
 function rangeSize(range: OutlineRange): number {
   return (range.end.line - range.start.line) * 1_000_000
     + range.end.character - range.start.character;
+}
+
+/** 条件编译指令作为文字前缀显示，原始名称继续用于搜索与跳转。 */
+export function getOutlineSymbolPresentation(kind: string, name: string): { directive: string; displayName: string } {
+  if (kind === 'PreprocessorRegion' || kind === 'PreprocessorBranch') {
+    const match = /^#\s*(if|ifdef|ifndef|elif|else)\b\s*(.*)$/.exec(name);
+    if (match !== null) return { directive: `#${match[1]}`, displayName: match[2] ?? '' };
+  }
+  return { directive: '', displayName: name };
 }

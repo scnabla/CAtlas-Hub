@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import process from 'node:process';
 import { createVSIX } from '@vscode/vsce';
+import { prepareLocalTestConfig } from './local-test-config.mjs';
 
 // 导入函数做单元测试时不生成安装包，也不启动 VS Code。
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -37,8 +38,12 @@ async function main() {
       PROJECT_BUTLER_TEST_ID: `${manifest.publisher}.${manifest.name}`,
       PROJECT_BUTLER_TEST_SHA256: sha256 };
     const cli = path.join(projectRoot, 'node_modules/@vscode/test-cli/out/bin.mjs');
+    const localExecutable = process.env.PROJECT_BUTLER_TEST_VSCODE_EXECUTABLE;
+    const configArgs = localExecutable
+      ? ['--config', await prepareLocalTestConfig(projectRoot, localExecutable, outputPath, env, run)]
+      : [];
     for (const label of ['todoOomRegression', 'extensionHost', 'installedVsix']) {
-      await run(process.execPath, [cli, '--label', label], projectRoot, env);
+      await run(process.execPath, [cli, ...configArgs, '--label', label], projectRoot, env);
       if (await hashPackage(outputPath) !== sha256) throw new Error('测试期间安装包发生变化，禁止继续发布。');
     }
     console.log('同一候选包的 OOM、源码宿主和安装态验证全部完成。');

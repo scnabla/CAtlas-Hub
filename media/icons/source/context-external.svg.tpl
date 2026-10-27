@@ -1,4 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke="{{primary}}" stroke-width="2.7" stroke-linejoin="round"/>
-  <path d="M13.5 12.5 19 18M19 12.5 13.5 18" stroke="{{accent}}" stroke-width="2.7" stroke-linecap="round"/>
+  <path d="M3 5h5l2 2h7v5h-5v8H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" fill="{{primary}}" fill-rule="evenodd"/><path d="M14 20l8-8M16 12h6v6" stroke="{{secondary}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

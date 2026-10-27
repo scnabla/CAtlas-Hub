@@ -1,10 +1,11 @@
+import { getPersonalConfiguration, onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { applyPersonalSettingValue } from '../configuration/configurationTreeProvider';
 import { detectVscodeCapabilities } from '../platform/vscodeCapabilities';
 import { closeAllEditors, getApi } from './helpers';
 
-const EXTENSION_ID = 'scnable.catlas-hub';
+const EXTENSION_ID = 'scnabla.catlas-hub';
 
 suite('CAtlas Hub Extension Host 集成测试', () => {
   suiteTeardown(async () => {
@@ -50,7 +51,7 @@ suite('CAtlas Hub Extension Host 集成测试', () => {
   });
 
   test('INT-003 写入用户级 AI 开关并识别工作区覆盖', async () => {
-    const configuration = vscode.workspace.getConfiguration('chat');
+    const configuration = getPersonalConfiguration('chat');
     if (!detectVscodeCapabilities().chatDisableAiFeatures.supported) {
       const before = configuration.inspect('disableAIFeatures');
       await assert.rejects(() => applyPersonalSettingValue('disableAiFeatures', true), /未注册 chat\.disableAIFeatures/);
@@ -87,7 +88,7 @@ function waitForConfigurationChange(section: string): { promise: Promise<void>; 
       disposable.dispose();
       reject(new Error(`等待配置变化超时：${section}`));
     }, 10_000);
-    const disposable = vscode.workspace.onDidChangeConfiguration((event) => {
+    const disposable = onDidChangePersonalConfiguration((event) => {
       if (!event.affectsConfiguration(section)) return;
       clearTimeout(timeout);
       disposable.dispose();

@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
@@ -474,7 +475,7 @@ export class ProjectCatalogService implements vscode.Disposable {
       return;
     }
 
-    const configuredMode = vscode.workspace.getConfiguration('projectManager.projectCatalog')
+    const configuredMode = getPersonalConfiguration('projectManager.projectCatalog')
       .get<'prompt' | 'newWindow' | 'currentWindow'>('openMode', 'prompt');
     let openMode: 'newWindow' | 'currentWindow' | undefined = mode;
     if (openMode === undefined && configuredMode === 'prompt') {
@@ -765,7 +766,7 @@ export class ProjectCatalogService implements vscode.Disposable {
     }
     await this.load(catalogUri, document.getText(), true);
     const appliesNow = this.projectContext.kind === 'member';
-    const inspected = vscode.workspace.getConfiguration('projectManager.symbolOutline').inspect<string>('mode');
+    const inspected = getPersonalConfiguration('projectManager.symbolOutline').inspect<string>('mode');
     const hasWorkspaceOverride = inspected?.workspaceFolderValue !== undefined
       || inspected?.workspaceValue !== undefined;
     await vscode.window.showInformationMessage(

@@ -6,6 +6,7 @@ import {
   createSymbolId,
   findCurrentSymbol,
   getOutlineDisplayName,
+  getOutlineSymbolPresentation,
   OutlineSymbol,
   projectSymbols,
 } from '../symbolOutline/symbolModel';
@@ -141,5 +142,52 @@ describe('函数大纲领域模型', () => {
     const type = symbol('Demo', 'Class', 1, 8, [method]);
 
     assert.equal(findCurrentSymbol([type], { line: 3, character: 0 })?.name, 'run');
+  });
+});
+
+describe('条件编译指令显示', () => {
+  it('指令包含井号且与条件表达式分开，普通符号保持完整名称', () => {
+    for (const [name, directive, displayName] of [
+      ['#if MODE == 1', '#if', 'MODE == 1'],
+      ['#ifdef FEATURE', '#ifdef', 'FEATURE'],
+      ['#ifndef FEATURE', '#ifndef', 'FEATURE'],
+      ['# elif MODE == 2', '#elif', 'MODE == 2'],
+      ['#else', '#else', ''],
+      ['#elsewhere value', '', '#elsewhere value'],
+    ]) {
+      for (const kind of ['PreprocessorRegion', 'PreprocessorBranch']) {
+        assert.deepEqual(getOutlineSymbolPresentation(kind, name!), { directive, displayName });
+      }
+    }
+    assert.deepEqual(getOutlineSymbolPresentation('Function', '#else'), { directive: '', displayName: '#else' });
+  });
+});
+
+describe('条件编译搜索范围', () => {
+  it('默认与仅函数范围可命中指令或条件，并保留相关函数', () => {
+    const branch = symbol('#elif MODE == 2', 'PreprocessorBranch', 2, 6, [
+      symbol('run', 'Function', 3, 4), symbol('hidden', 'Variable', 5, 5),
+    ]);
+    const root = symbol('#if FIRST', 'PreprocessorRegion', 0, 8, [branch]);
+    for (const scope of ['functionsAndTypes', 'functions', 'all'] as const) {
+      for (const query of ['#elif', '#ELIF MODE', 'MODE == 2']) {
+        const result = projectSymbols([root], { ...defaults, scope, query });
+        assert.equal(result[0]?.children[0]?.name, branch.name);
+        assert.equal(result[0]?.children[0]?.isContext, false);
+        assert.deepEqual(result[0]?.children[0]?.children.map(item => item.name),
+          scope === 'all' ? ['run', 'hidden'] : ['run']);
+      }
+    }
+  });
+
+  it('无子符号的分支可搜索，空查询与不匹配查询不扩大原有范围', () => {
+    const branch = symbol('#else', 'PreprocessorBranch', 2, 3);
+    for (const hierarchy of ['tree', 'flat'] as const) {
+      assert.equal(projectSymbols([branch], { ...defaults, hierarchy, query: '#else' })[0]?.name, '#else');
+      assert.deepEqual(projectSymbols([branch], { ...defaults, hierarchy, query: '' }), []);
+      assert.deepEqual(projectSymbols([branch], { ...defaults, hierarchy, query: 'other' }), []);
+    }
+    const variable = symbol('#elif', 'Variable', 0, 0);
+    assert.deepEqual(projectSymbols([variable], { ...defaults, query: '#elif' }), []);
   });
 });

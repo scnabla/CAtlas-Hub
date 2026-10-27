@@ -22,9 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - windows-latest
-          - ubuntu-latest
+        os: [ubuntu-24.04, windows-2022]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -50,13 +48,14 @@ jobs:
         run: npm run test:release-tools
 
   extension-host:
-    name: Extension Host (Windows, VS Code ${{ matrix.vscode }})
+    name: Extension Host (${{ matrix.os }}, VS Code ${{ matrix.vscode }})
     needs: quality
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-24.04, windows-2022]
         vscode: ['1.88.0', 'stable']
     env:
       PROJECT_BUTLER_TEST_VSCODE_VERSION: ${{ matrix.vscode }}
@@ -81,9 +80,21 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Install Linux test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0t64 libnss3 libgbm1 libasound2t64 libxss1
+
       - name: Prepare package directory
-        run: node -e "require('node:fs').mkdirSync('releases', { recursive: true })"
+        run: |
+          node -e "require('node:fs').mkdirSync('releases', { recursive: true })"
 
       # 在同一进程中传递本轮产物，依次验证 OOM、源码宿主与安装态；任一步失败立即终止。
-      - name: Build and verify exact candidate (OOM, source, installed)
+      - name: Build and verify exact candidate on Linux (OOM, source, installed)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:integration
+
+      - name: Build and verify exact candidate on Windows (OOM, source, installed)
+        if: runner.os == 'Windows'
         run: npm run test:integration

@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import childProcess = require('node:child_process');
 import { EventEmitter } from 'node:events';
@@ -114,7 +115,7 @@ suite('TODO OOM 回归', () => {
     const api = await getApi();
     await api.todo.waitForIdleForIntegrationTest();
     api.todo.provider.scope = 'workspace';
-    const configuration = vscode.workspace.getConfiguration('projectManager.todo');
+    const configuration = getPersonalConfiguration('projectManager.todo');
     const original = configuration.inspect<boolean>('highlight')?.workspaceValue;
     const effective = configuration.get<boolean>('highlight', true);
     const scan = sandbox.stub(api.todo.scanner, 'scanWorkspace').resolves(completedSummary(false));

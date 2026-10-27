@@ -41,12 +41,11 @@ const palette = JSON.parse(
   readonly modes: Record<string, Record<string, Record<string, string>>>;
 };
 
-const sourceInsightOutlineGroups = [
-  ['symbol-function', 'symbol-method', 'symbol-constructor'],
+const symbolColorGroups = [
+  ['symbol-function', 'symbol-method', 'symbol-constructor', 'symbol-variable'],
   ['symbol-class', 'symbol-interface', 'symbol-struct', 'symbol-enum', 'symbol-type-parameter'],
-  ['symbol-property', 'symbol-field', 'symbol-variable', 'symbol-enum-member'],
+  ['symbol-property', 'symbol-field', 'symbol-enum-member'],
   ['symbol-file', 'symbol-module', 'symbol-namespace', 'symbol-package'],
-  ['symbol-preprocessor-region', 'symbol-preprocessor-branch'],
 ] as const;
 
 const geometryAttributes = new Set([
@@ -54,7 +53,7 @@ const geometryAttributes = new Set([
 ]);
 
 function geometrySignature(source: string): readonly string[] {
-  return [...source.matchAll(/<(path|rect|circle)\b([^>]*)>/g)].map((element) => {
+  return [...source.matchAll(/<(g|path|rect|circle)\b([^>]*)>/g)].map((element) => {
     const elementName = element[1] ?? '';
     const rawAttributes = element[2] ?? '';
     const attributes = [...rawAttributes.matchAll(/([\w:-]+)="([^"]*)"/g)]
@@ -67,18 +66,18 @@ function geometrySignature(source: string): readonly string[] {
 
 describe('统一标识视觉基线', () => {
   test('包含完整且语义唯一的基准图标', () => {
-    assert.equal(manifest.version, 5);
+    assert.equal(manifest.version, 7);
     assert.equal(manifest.grid, '24x24');
-    assert.equal(manifest.icons.length, 43);
-    assert.equal(new Set(manifest.icons.map((icon) => icon.id)).size, 43);
-    assert.ok(manifest.strokeWidth >= 2.7);
+    assert.equal(manifest.icons.length, 41);
+    assert.equal(new Set(manifest.icons.map((icon) => icon.id)).size, 41);
+    assert.ok(manifest.strokeWidth >= 2 && manifest.strokeWidth <= 2.4);
     assert.deepEqual(manifest.colorStrategy.themes, ['light', 'dark']);
     assert.equal(manifest.colorStrategy.highContrast, 'monochrome');
     assert.equal(manifest.colorStrategy.activityBar, 'monochrome');
   });
 
   test('每个图标只有一份几何源稿并使用集中调色板', () => {
-    assert.equal(palette.version, 1);
+    assert.equal(palette.version, 3);
     assert.deepEqual(palette.tokens, ['primary', 'surface', 'secondary', 'accent']);
     assert.deepEqual(Object.keys(palette.modes), ['monochrome', 'light', 'dark']);
 
@@ -116,7 +115,7 @@ describe('统一标识视觉基线', () => {
         const colors = new Set(source.match(/#[0-9a-f]{6}/gi) ?? []);
         assert.match(source, /viewBox="0 0 24 24"/);
         assert.ok(colors.size >= 1, `${icon.id} 的 ${theme} 资源至少需要一种可见颜色`);
-        assert.ok(colors.size <= 3, `${icon.id} 的 ${theme} 资源不得使用超过三种颜色`);
+        assert.ok(colors.size <= 2, `${icon.id} 的 ${theme} 资源不得使用超过两种颜色`);
         assert.deepEqual(
           geometrySignature(source),
           geometrySignature(monochromeSource),
@@ -128,35 +127,56 @@ describe('统一标识视觉基线', () => {
     }
   });
 
-  test('Source Insight 风格大纲按类别统一颜色且不添加装饰性色', () => {
-    const callableTiles = new Set(['symbol-function', 'symbol-method', 'symbol-constructor']);
+  test('简约符号按类别统一颜色并移除字母底板', () => {
     for (const icon of manifest.icons.filter((candidate) => candidate.id.startsWith('symbol-'))) {
       const source = fs.readFileSync(
         path.resolve(baselineDirectory, manifest.sourceRoot, icon.source),
         'utf8',
       );
       assert.doesNotMatch(source, /\{\{(?:secondary|accent)\}\}/, `${icon.id} 不应包含装饰性色`);
-      if (callableTiles.has(icon.id)) {
-        assert.match(source, /\{\{surface\}\}/, `${icon.id} 应保留 Source Insight 式同色系底板`);
-      } else {
-        assert.doesNotMatch(source, /\{\{surface\}\}/, `${icon.id} 不应无意义增加底板`);
-      }
+      assert.doesNotMatch(source, /\{\{surface\}\}/, `${icon.id} 不应包含装饰底板`);
     }
 
     for (const theme of ['light', 'dark']) {
       const themePalette: Record<string, Record<string, string>> | undefined = palette.modes[theme];
       assert.ok(themePalette !== undefined);
-      for (const group of sourceInsightOutlineGroups) {
+      for (const group of symbolColorGroups) {
         const groupColors: Set<string | undefined> = new Set<string | undefined>(
           group.map((id): string | undefined => themePalette[id]?.primary),
         );
         assert.equal(groupColors.size, 1, `${theme} 下同类大纲图标必须使用同一主色：${group.join(', ')}`);
       }
-      for (const id of ['symbol-preprocessor-region', 'symbol-preprocessor-branch', 'symbol-macro-definition']) {
+      for (const id of ['symbol-macro-definition']) {
         const tokens: Record<string, string> | undefined = themePalette[id];
         assert.ok(tokens !== undefined);
         assert.equal(tokens.primary, tokens.secondary, `${id} 不应拆成不同色调`);
         assert.equal(tokens.primary, tokens.accent, `${id} 不应包含装饰性强调色`);
+      }
+    }
+  });
+
+
+  test('简约图标仅在约定类别间复用轮廓，明暗主题关键颜色达到 3:1 对比度', () => {
+    const sharedShapes = [
+      new Set(['symbol-function', 'symbol-method']),
+      new Set(['symbol-number', 'symbol-macro-definition']),
+    ];
+    const signatures = new Map<string, string>();
+    for (const icon of manifest.icons) {
+      const source = fs.readFileSync(path.resolve(baselineDirectory, manifest.sourceRoot, icon.source), 'utf8');
+      const signature = geometrySignature(source).join('|');
+      const previous = signatures.get(signature);
+      assert.ok(previous === undefined || sharedShapes.some((group) => group.has(previous) && group.has(icon.id)),
+        `${icon.id} 与 ${previous} 的轮廓重复且没有约定复用`);
+      signatures.set(signature, icon.id);
+      for (const theme of ['light', 'dark']) {
+        const background = theme === 'light' ? '#FFFFFF' : '#1F1F1F';
+        const rendered = fs.readFileSync(path.join(baselineDirectory, icon.files[theme as 'light' | 'dark']), 'utf8');
+        for (const color of new Set(rendered.match(/#[0-9a-f]{6}/gi) ?? [])) {
+          const lighter = Math.max(luminance(color), luminance(background));
+          const darker = Math.min(luminance(color), luminance(background));
+          assert.ok((lighter + 0.05) / (darker + 0.05) >= 3, `${icon.id}/${theme}/${color} 对比度不足`);
+        }
       }
     }
   });
@@ -187,3 +207,9 @@ describe('统一标识视觉基线', () => {
     }
   });
 });
+
+function luminance(hex: string): number {
+  const components = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+    .map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  return components[0]! * 0.2126 + components[1]! * 0.7152 + components[2]! * 0.0722;
+}

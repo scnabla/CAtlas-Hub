@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { PersonalDataStore } from '../storage/personalDataStore';
 import { ExclusionServiceV2 } from '../exclusions/exclusionServiceV2';
 import { ExternalFileMonitor } from '../externalFiles/externalFileMonitor';
 import { RegisteredProjectCatalogV2 } from '../projectCatalog/registerProjectCatalogV2';
@@ -13,6 +14,7 @@ import { RegisteredTodo } from '../todo/registerTodo';
  */
 export interface ProjectButlerApi {
   readonly context: vscode.ExtensionContext;
+  readonly personalData: PersonalDataStore;
   readonly output: vscode.OutputChannel;
   readonly exclusions: ExclusionServiceV2;
   readonly externalFiles: ExternalFileMonitor;

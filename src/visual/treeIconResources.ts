@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 把统一图标定义转换为 TreeItem 使用的明暗主题 URI，或按设置退回原生 ThemeIcon。
  * Webview 使用另一套资源地址转换，不能直接复用这里的 URI；两者应共用 iconSemantics 的含义映射。
@@ -25,7 +26,7 @@ export function createTreeIconPath(
 
 export function getConfiguredIconStyle(): IconStyle {
   return normalizeIconStyle(
-    vscode.workspace.getConfiguration('projectManager.visuals').get<unknown>('iconStyle'),
+    getPersonalConfiguration('projectManager.visuals').get<unknown>('iconStyle'),
   );
 }
 
@@ -35,11 +36,16 @@ export function createTreeIcon(
   nativeFallback: string,
   style: IconStyle = getConfiguredIconStyle(),
 ): vscode.ThemeIcon | TreeIconPath {
-  return extensionUri === undefined || style === 'native'
+  return extensionUri === undefined || style === 'native' || isHighContrastTheme()
     ? new vscode.ThemeIcon(nativeFallback)
     : createTreeIconPath(extensionUri, semantic);
 }
 
 function toExtensionUri(extensionUri: vscode.Uri, relativePath: string): vscode.Uri {
   return vscode.Uri.joinPath(extensionUri, ...relativePath.split('/'));
+}
+
+export function isHighContrastTheme(): boolean {
+  const kind = vscode.window.activeColorTheme.kind;
+  return kind === vscode.ColorThemeKind.HighContrast || kind === vscode.ColorThemeKind.HighContrastLight;
 }

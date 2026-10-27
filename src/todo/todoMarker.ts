@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 处理标记的选择、插入与修改，通过 WorkspaceEdit 编辑文档，不自动替用户保存文件。
  * 已有描述候选由注册入口从个人标记索引提供；写入身份取自配置，不从 Git 提交身份推断。
@@ -107,9 +108,9 @@ export class TodoMarker {
     if (owner === undefined) return undefined;
     if (settings.owner !== undefined && settings.owner.toLocaleLowerCase() !== owner.toLocaleLowerCase()) {
       const aliases = normalizeTodoOwners(undefined, [...settings.ownerAliases, settings.owner]);
-      await vscode.workspace.getConfiguration('projectManager.todo').update('ownerAliases', aliases, vscode.ConfigurationTarget.Global);
+      await getPersonalConfiguration('projectManager.todo').update('ownerAliases', aliases, vscode.ConfigurationTarget.Global);
     }
-    await vscode.workspace.getConfiguration('projectManager.todo').update('owner', owner, vscode.ConfigurationTarget.Global);
+    await getPersonalConfiguration('projectManager.todo').update('owner', owner, vscode.ConfigurationTarget.Global);
     return owner;
   }
 

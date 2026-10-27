@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import * as sinon from 'sinon';
@@ -38,7 +39,7 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
   test('INT-196 注册 TODO 视图、命令和配置分组', async () => {
     const api = await getApi();
     await api.todo.waitForIdleForIntegrationTest();
-    const extension = vscode.extensions.getExtension('scnable.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
     assert.ok(extension);
     const views = extension.packageJSON.contributes?.views as Record<string, Array<{ id?: string; visibility?: string }>>;
     const todoInExplorer = views.explorer?.filter((view) => view.id === 'projectManager.todoView') ?? [];
@@ -238,7 +239,7 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
   test('INT-206 工作区扫描合并 files.exclude 并排除对应源码', async () => {
     const api = await getApi();
     await closeAllEditors();
-    const configuration = vscode.workspace.getConfiguration('files');
+    const configuration = getPersonalConfiguration('files');
     const original = configuration.inspect<Record<string, unknown>>('exclude')?.workspaceValue;
     const uri = vscode.Uri.joinPath(currentWorkspaceUri(), 'src', 'todo-sample.ts');
     try {
@@ -525,7 +526,7 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
 
   test('INT-228 打开的排除文件在完整更新结束后仍保留实时个人标记', async () => {
     const api = await getApi();
-    const configuration = vscode.workspace.getConfiguration('files');
+    const configuration = getPersonalConfiguration('files');
     const original = configuration.inspect<Record<string, unknown>>('exclude')?.workspaceValue;
     const uri = vscode.Uri.joinPath(currentWorkspaceUri(), 'src', 'todo-sample.ts');
     try {
@@ -676,7 +677,7 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
 
   test('INT-229 关闭排除文件后后台更新将其从个人标记集合移除', async () => {
     const api = await getApi();
-    const configuration = vscode.workspace.getConfiguration('files');
+    const configuration = getPersonalConfiguration('files');
     const original = configuration.inspect<Record<string, unknown>>('exclude')?.workspaceValue;
     const uri = vscode.Uri.joinPath(currentWorkspaceUri(), 'src', 'todo-sample.ts');
     try {

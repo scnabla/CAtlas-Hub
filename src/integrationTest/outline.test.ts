@@ -317,6 +317,60 @@ suite('增强函数大纲', () => {
     }
   });
 
+  test('INT-238 条件编译指令显示一次且保留嵌套、搜索与跳转', async () => {
+    const api = await getApi();
+    const uri = projectUri(api, 'test-fixtures/workspace-one/src/outline-branches.c');
+    const provider = vscode.languages.registerDocumentSymbolProvider({ language: 'c', scheme: 'file' }, {
+      provideDocumentSymbols(document) {
+        if (document.uri.toString() !== uri.toString()) return [];
+        return document.getText().split(/\r?\n/).flatMap((line, index) => {
+          const name = /^void (\w+)/.exec(line)?.[1];
+          return name === undefined ? [] : [new vscode.DocumentSymbol(name, '', vscode.SymbolKind.Function,
+            new vscode.Range(index, 0, index, line.length), new vscode.Range(index, 5, index, 5 + name.length))];
+        });
+      },
+    });
+    try {
+      const editor = await openText(uri);
+      await vscode.languages.setTextDocumentLanguage(editor.document, 'c');
+      await api.outline.refreshSymbols('条件编译图标测试');
+      const region = api.outline.getStateForIntegrationTest().symbols[0];
+      assert.equal(region?.iconSemantic, 'symbol.preprocessor-region');
+      assert.equal(region?.directive, '#if');
+      assert.equal(region?.displayName, 'MODE == 1');
+      const elifBranch = region?.children.find(symbol => symbol.name === '#elif MODE == 2');
+      const elseBranch = region?.children.find(symbol => symbol.name === '#else');
+      assert.equal(elifBranch?.iconSemantic, 'symbol.preprocessor-branch');
+      assert.equal(elifBranch?.directive, '#elif');
+      assert.equal(elifBranch?.displayName, 'MODE == 2');
+      assert.equal(elseBranch?.iconSemantic, 'symbol.preprocessor-else');
+      assert.equal(elseBranch?.directive, '#else');
+      assert.equal(elseBranch?.displayName, '');
+      assert.equal(elseBranch?.name, '#else');
+      assert.equal(elseBranch?.selectionRange.start.line, 9);
+      const nested = elifBranch?.children.find(symbol => symbol.name === '#ifdef NESTED');
+      assert.equal(nested?.iconSemantic, 'symbol.preprocessor-region');
+      assert.equal(nested?.directive, '#ifdef');
+      assert.equal(nested?.displayName, 'NESTED');
+      assert.equal(nested?.children.find(symbol => symbol.name === '#else')?.iconSemantic, 'symbol.preprocessor-else');
+      await api.outline.setQueryForIntegrationTest('fallback_path');
+      const filtered = api.outline.getStateForIntegrationTest().symbols[0];
+      assert.equal(filtered?.children.find(symbol => symbol.name === '#else')?.directive, '#else');
+      assert.equal(api.outline.getStateForIntegrationTest().preferences.scope, 'functionsAndTypes');
+      await api.outline.setQueryForIntegrationTest('#elif');
+      const directiveResult = api.outline.getStateForIntegrationTest().symbols[0]?.children
+        .find(symbol => symbol.name === '#elif MODE == 2');
+      assert.equal(directiveResult?.directive, '#elif');
+      assert.equal(directiveResult?.displayName, 'MODE == 2');
+      assert.equal(api.outline.getStateForIntegrationTest().preferences.scope, 'functionsAndTypes');
+      await api.outline.setQueryForIntegrationTest('#elif MODE');
+      assert.equal(api.outline.getStateForIntegrationTest().symbols[0]?.children[0]?.directive, '#elif');
+    } finally {
+      provider.dispose();
+      await api.outline.setQueryForIntegrationTest('');
+    }
+  });
+
   test('INT-178 增强大纲依赖的原生命令通过集中能力层检测', async () => {
     assert.equal(await hasVscodeCommand('workbench.extensions.search'), true);
     assert.equal(await hasVscodeCommand('projectManager.commandThatDoesNotExist'), false);

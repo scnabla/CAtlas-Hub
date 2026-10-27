@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as path from 'node:path';
 import * as sinon from 'sinon';
@@ -26,7 +27,7 @@ suite('标签页自动与手动整理', () => {
     const api = await getApi();
     await resetCatalogs(api);
     await applyPersonalSettingValue('tabDefault', false);
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', false, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', false, vscode.ConfigurationTarget.Workspace);
     await closeAllEditors();
     await delay(800);
     await api.tabs.waitForIdleForIntegrationTest();
@@ -40,7 +41,7 @@ suite('标签页自动与手动整理', () => {
   test('INT-083 从关闭切换为开启后立即把已打开外部标签移到末尾', async () => {
     const api = await getApi();
     await openExternalBeforeProject(api);
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     await waitUntil(() => baseName(tabUris().at(-1) ?? '') === 'outside.txt', '开启后未立即把外部标签移到末尾');
   });
 
@@ -89,7 +90,7 @@ suite('标签页自动与手动整理', () => {
 
   test('INT-089 设置页作为特殊标签保持在可移动区段末尾', async () => {
     const api = await getApi();
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     await openText(projectUri(api, 'test-fixtures/workspace-one/src/app.ts'));
     await vscode.commands.executeCommand('workbench.action.openSettings');
     await delay(500);
@@ -100,7 +101,7 @@ suite('标签页自动与手动整理', () => {
 
   test('INT-090 特殊标签待处理后切回普通文件可补偿', async () => {
     const api = await getApi();
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     await vscode.commands.executeCommand('workbench.action.openSettings');
     await openText(projectUri(api, 'test-fixtures/workspace-one/normal.txt'));
     await delay(500);
@@ -142,7 +143,7 @@ suite('标签页自动与手动整理', () => {
 
   test('INT-094 快速连续打开后全部文件仍存在', async () => {
     const api = await getApi();
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     const uris = fixtureTextUris(api);
     await Promise.all(uris.map(async (uri) => openText(uri)));
     await delay(800);
@@ -153,7 +154,7 @@ suite('标签页自动与手动整理', () => {
   test('INT-095 自动模式会补偿处理当前编辑器组', async () => {
     const api = await getApi();
     await openExternalBeforeProject(api);
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     await api.tabs.waitForIdleForIntegrationTest();
     await waitUntil(
       () => baseName(tabUris().at(-1) ?? '') === 'outside.txt',
@@ -203,15 +204,15 @@ suite('标签页自动与手动整理', () => {
     await seedCatalogs(api, [externalCatalog], externalCatalog.id);
     await applyPersonalSettingValue('tabDefault', false);
     assert.equal(api.catalogs.service.currentProjectTabSettings, undefined);
-    assert.equal(vscode.workspace.getConfiguration('projectManager.tabs').get('autoOrganize'), false);
+    assert.equal(getPersonalConfiguration('projectManager.tabs').get('autoOrganize'), false);
   });
 
   test('INT-101 工作区显式覆盖高于集合与个人值', async () => {
     await applyPersonalSettingValue('tabDefault', true);
-    const inspected = vscode.workspace.getConfiguration('projectManager.tabs').inspect<boolean>('autoOrganize');
+    const inspected = getPersonalConfiguration('projectManager.tabs').inspect<boolean>('autoOrganize');
     assert.equal(inspected?.globalValue, true);
     assert.equal(inspected?.workspaceValue, false);
-    assert.equal(vscode.workspace.getConfiguration('projectManager.tabs').get('autoOrganize'), false);
+    assert.equal(getPersonalConfiguration('projectManager.tabs').get('autoOrganize'), false);
   });
 
   test('INT-102 重复整理在性能基线内且顺序稳定', async () => {
@@ -304,7 +305,7 @@ suite('标签页自动与手动整理', () => {
         }
         return;
       }
-      const current = vscode.workspace.getConfiguration('explorer').get<number>('openEditors.visible');
+      const current = getPersonalConfiguration('explorer').get<number>('openEditors.visible');
       if (current === 0) {
         assert.ok(information.called, '支持自动隐藏的版本应显示成功反馈');
         assert.ok(api.openedFilesTree.modeService.getRestoreRecordForIntegrationTest());
@@ -362,7 +363,7 @@ suite('标签页自动与手动整理', () => {
 
   test('INT-184 前台打开外部文件后整理仍保持该文件为活动页', async () => {
     const api = await getApi();
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     await openText(projectUri(api, 'test-fixtures/workspace-one/src/app.ts'));
     const external = projectUri(api, 'test-fixtures/external/outside.txt');
     await openText(external);
@@ -374,7 +375,7 @@ suite('标签页自动与手动整理', () => {
 
   test('INT-185 后台打开外部文件后整理不会抢走当前文件焦点', async () => {
     const api = await getApi();
-    await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+    await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     const project = projectUri(api, 'test-fixtures/workspace-one/src/app.ts');
     await openText(project);
     const external = projectUri(api, 'test-fixtures/external/outside.txt');
@@ -388,7 +389,7 @@ suite('标签页自动与手动整理', () => {
 
   test('INT-227 前部打开外部文件时直接移到末尾且不逐项激活项目文件', async () => {
     const api = await getApi();
-    const editorConfiguration = vscode.workspace.getConfiguration('workbench.editor');
+    const editorConfiguration = getPersonalConfiguration('workbench.editor');
     const originalOpenPositioning = editorConfiguration.inspect<string>('openPositioning')?.workspaceValue;
     const first = projectUri(api, 'test-fixtures/workspace-one/README.md');
     const second = projectUri(api, 'test-fixtures/workspace-one/src/app.ts');
@@ -397,7 +398,7 @@ suite('标签页自动与手动整理', () => {
 
     await editorConfiguration.update('openPositioning', 'right', vscode.ConfigurationTarget.Workspace);
     try {
-      await vscode.workspace.getConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+      await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
       await openText(first);
       await openText(second);
       await openText(third);
@@ -477,7 +478,7 @@ suite('标签页自动与手动整理', () => {
   });
 
   test('INT-191 标题栏只提供文字形式的隐藏原生视图操作', () => {
-    const extension = vscode.extensions.getExtension('scnable.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
     assert.ok(extension);
     const contributes = extension.packageJSON.contributes as {
       commands: Array<{ command: string; title: string; icon?: string }>;

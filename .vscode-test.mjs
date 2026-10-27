@@ -10,6 +10,7 @@ export default defineConfig([
     label: 'todoOomRegression',
     files: 'dist/integrationTest/todoOomRegression.test.js',
     version: testVscodeVersion,
+    env: { CATLAS_PERSONAL_DATA_DIRECTORY: process.env.CATLAS_PERSONAL_DATA_DIRECTORY ?? path.join(projectRoot, '.vscode-test', 'personal-data-source') },
     extensionDevelopmentPath: projectRoot,
     workspaceFolder: path.join(projectRoot, 'test-fixtures', 'workspace-one'),
     launchArgs: [
@@ -30,6 +31,7 @@ export default defineConfig([
     files: [
       'dist/integrationTest/extensionHost.test.js',
       'dist/integrationTest/configuration.test.js',
+      'dist/integrationTest/dataLocation.test.js',
       'dist/integrationTest/contextAndCatalog.test.js',
       'dist/integrationTest/tabs.test.js',
       'dist/integrationTest/exclusions.test.js',
@@ -41,6 +43,7 @@ export default defineConfig([
       'dist/integrationTest/todo.test.js',
     ],
     version: testVscodeVersion,
+    env: { CATLAS_PERSONAL_DATA_DIRECTORY: process.env.CATLAS_PERSONAL_DATA_DIRECTORY ?? path.join(projectRoot, '.vscode-test', 'personal-data-source') },
     extensionDevelopmentPath: projectRoot,
     workspaceFolder: path.join(projectRoot, 'test-fixtures', 'workspace-one'),
     launchArgs: [

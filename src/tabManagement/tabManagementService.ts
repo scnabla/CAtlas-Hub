@@ -1,3 +1,4 @@
+import { onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 执行标签移动并维护待处理事件；tabGrouping 计算位置，pendingTabWork 决定何时可以执行。
  * 当前目标是保留工作区内文件相对顺序，将外部文件及特殊编辑器放在后方，不是按目录重排项目文件。
@@ -47,7 +48,7 @@ export class TabManagementService implements vscode.Disposable {
       vscode.window.tabGroups.onDidChangeTabGroups((event) => {
         for (const group of event.closed) this.clearGroupState(group.viewColumn);
       }),
-      vscode.workspace.onDidChangeConfiguration((event) => {
+      onDidChangePersonalConfiguration((event) => {
         if (event.affectsConfiguration('projectManager.tabs')) {
           this.onSettingsChanged();
         }

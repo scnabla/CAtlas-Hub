@@ -1,4 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <circle cx="8" cy="9" r="4.5" stroke="{{primary}}" stroke-width="2.7"/>
-  <path d="m11.5 12 8 8M15 15.5l2-2M18 18.5l2-2" stroke="{{primary}}" stroke-width="2.7" stroke-linecap="round"/>
+  <path d="M8 4a6 6 0 1 0 5.6 8H17v4h3v-4h2V8h-8.4A6 6 0 0 0 8 4Zm0 3a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z" fill="{{primary}}" fill-rule="evenodd"/>
 </svg>

@@ -1,6 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <path d="M9 6h11M9 12h11M9 18h11" stroke="{{primary}}" stroke-width="2.7" stroke-linecap="round"/>
-  <circle cx="4.5" cy="6" r="2" fill="{{primary}}"/>
-  <circle cx="4.5" cy="12" r="2" fill="{{primary}}"/>
-  <circle cx="4.5" cy="18" r="2" fill="{{primary}}"/>
+  <circle cx="6" cy="12" r="3" fill="{{primary}}"/><path d="M13 12h8" stroke="{{primary}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

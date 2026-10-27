@@ -1,3 +1,4 @@
+import { onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { inferProjectType } from './catalogModel';
@@ -57,7 +58,7 @@ export class ProjectCatalogTreeProvider implements vscode.TreeDataProvider<Proje
   public constructor(private readonly service: ProjectCatalogService) {
     this.subscriptions = [
       service.onDidChange(() => this.changeEmitter.fire(undefined)),
-      vscode.workspace.onDidChangeConfiguration((event) => {
+      onDidChangePersonalConfiguration((event) => {
         if (event.affectsConfiguration('projectManager.tabs')
           || event.affectsConfiguration('projectManager.symbolOutline.mode')) {
           this.changeEmitter.fire(undefined);

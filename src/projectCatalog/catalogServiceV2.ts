@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 管理项目集合的内存状态、持久化和当前工作区所属项目，并实现功能配置来源接口。
  * 标签、大纲和 TODO 不直接读取这里的存储键，而是通过 configurationTypes 中的接口获取覆盖值。
@@ -169,22 +170,14 @@ export class ProjectCatalogServiceV2 implements vscode.Disposable, ProjectFeatur
 
   public async selectCatalog(): Promise<void> {
     if (this.library.catalogs.length === 0) {
-      const action = await vscode.window.showQuickPick([
-        { label: '$(add) 添加项目并创建集合', value: 'add' as const },
-        { label: '$(cloud-download) 导入集合', value: 'import' as const },
-      ], { title: '尚无项目集合' });
-      if (action?.value === 'add') {
-        await this.addProjectToCatalog();
-      } else if (action?.value === 'import') {
-        await this.importCatalog();
-      }
+      await this.addProjectToCatalog();
       return;
     }
     const selected = await vscode.window.showQuickPick(this.library.catalogs.map((catalog) => ({
       label: catalog.name,
       description: `${catalog.projects.length} 个项目${catalog.id === this.activeCatalog?.id ? ' · 当前集合' : ''}`,
       catalog,
-    })), { title: '选择项目集合', placeHolder: '切换管理目标；集合功能只对成员项目生效' });
+    })), { title: '选择项目集合', placeHolder: '选择当前查看和管理的集合' });
     if (selected !== undefined) {
       await this.activateCatalog(selected.catalog.id, true);
     }
@@ -579,6 +572,18 @@ export class ProjectCatalogServiceV2 implements vscode.Disposable, ProjectFeatur
     return this.updateCurrentTodoOverrides('tags', tags, showFeedback);
   }
 
+  public async reloadPersonalLibrary(): Promise<void> {
+    this.library = loadCatalogLibrary(this.context.globalState.get<unknown>(LIBRARY_KEY)).library;
+    const activeId = this.activeCatalog?.id;
+    if (activeId && this.library.catalogs.some((catalog) => catalog.id === activeId)) {
+      await this.activateCatalog(activeId, false);
+    } else {
+      this.activeCatalog = undefined;
+      this.revision += 1;
+      this.changeEmitter.fire(undefined);
+    }
+  }
+
   public async refresh(): Promise<void> {
     if (this.activeCatalog !== undefined) {
       await this.activateCatalog(this.activeCatalog.id, false);
@@ -609,7 +614,7 @@ export class ProjectCatalogServiceV2 implements vscode.Disposable, ProjectFeatur
       await vscode.window.showErrorMessage(project.runtimeIssue ?? '该项目路径当前不可用，请重新添加或导入时重映射基础目录。');
       return;
     }
-    const configuredMode = vscode.workspace.getConfiguration('projectManager.projectCatalog')
+    const configuredMode = getPersonalConfiguration('projectManager.projectCatalog')
       .get<'prompt' | 'newWindow' | 'currentWindow'>('openMode', 'prompt');
     let openMode = mode;
     if (openMode === undefined && configuredMode === 'prompt') {
@@ -828,11 +833,16 @@ export class ProjectCatalogServiceV2 implements vscode.Disposable, ProjectFeatur
   ): Promise<void> {
     const selected = await vscode.window.showQuickPick(choices, { title });
     if (selected !== undefined) {
-      await vscode.workspace.getConfiguration(section).update(key, selected.value, vscode.ConfigurationTarget.Global);
+      await getPersonalConfiguration(section).update(key, selected.value, vscode.ConfigurationTarget.Global);
     }
   }
 
   private async commitLibrary(next: CatalogLibrary, activeId: string | undefined): Promise<void> {
+    const latest = loadCatalogLibrary(this.context.globalState.get<unknown>(LIBRARY_KEY)).library;
+    if (JSON.stringify(latest) !== JSON.stringify(loadCatalogLibrary(this.library).library)) {
+      await this.reloadPersonalLibrary();
+      throw new Error('项目集合已被其他窗口修改，请重新执行本次操作。');
+    }
     await this.context.globalState.update(LIBRARY_KEY, next);
     this.library = next;
     if (activeId !== undefined) {

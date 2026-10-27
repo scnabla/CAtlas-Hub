@@ -36,6 +36,7 @@ if (process.env.PROJECT_BUTLER_TEST_VERSION !== manifest.version
 
 export const candidateConfig = {
   label: 'installedCandidate',
+  env: { CATLAS_PERSONAL_DATA_DIRECTORY: process.env.CATLAS_PERSONAL_DATA_DIRECTORY ?? path.join(projectRoot, '.vscode-test', 'personal-data-installed') },
   files: 'dist/integrationTest/installedVsix.test.js',
   version: testVscodeVersion,
   extensionDevelopmentPath: path.join(projectRoot, 'test-fixtures', 'test-harness-extension'),
@@ -46,6 +47,7 @@ export const candidateConfig = {
     ...isolatedStorageArgs,
     // 只在测试窗口禁用旧身份，不卸载旧包，也不修改用户日常启用状态。
     '--disable-extension', 'local-development.project-butler',
+    '--disable-extension', 'scnable.catlas-hub',
     '--disable-workspace-trust',
     '--skip-welcome',
     '--skip-release-notes',

@@ -1,3 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <path d="m13.76 3.64-7.04 9.68h5.28l-1.76 7.04 7.04-9.68h-5.28z" stroke="{{primary}}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M13 2 4 14h7l-1 8L21 9h-8Z" fill="{{primary}}" fill-rule="evenodd"/>
 </svg>

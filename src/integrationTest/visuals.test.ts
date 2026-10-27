@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { applyPersonalSettingValue, ConfigurationTreeNode } from '../configuration/configurationTreeProvider';
@@ -11,6 +12,7 @@ import {
   projectUri,
   seedCatalogs,
   setGlobalSetting,
+  waitUntil,
 } from './helpers';
 
 suite('统一图标风格与实时刷新', () => {
@@ -24,7 +26,7 @@ suite('统一图标风格与实时刷新', () => {
   });
 
   test('INT-192 Manifest 默认使用统一标识且侧栏可以写入原生风格', async () => {
-    const inspected = vscode.workspace.getConfiguration('projectManager.visuals')
+    const inspected = getPersonalConfiguration('projectManager.visuals')
       .inspect<string>('iconStyle');
     assert.equal(inspected?.defaultValue, 'unified');
 
@@ -98,6 +100,68 @@ suite('统一图标风格与实时刷新', () => {
     assert.equal(api.openedFilesTree.provider.getTreeItem(fileNode).iconPath, undefined);
     assert.ok(api.openedFilesTree.provider.getTreeItem(fileNode).resourceUri);
   });
+  test('INT-237 高对比度主题自动回退原生树图标并在普通主题恢复彩色', async () => {
+    const api = await getApi();
+    const previousTheme = getPersonalConfiguration('workbench').inspect<string>('colorTheme')?.globalValue;
+    const previousAutoDetect = getPersonalConfiguration('window').inspect<boolean>('autoDetectColorScheme')?.globalValue;
+    const themes = vscode.extensions.getExtension('vscode.theme-defaults')?.packageJSON.contributes.themes as
+      Array<{ id: string; uiTheme: string }> | undefined;
+    assert.ok(themes);
+    const catalog = createStoredCatalog('主题切换测试', []);
+    await seedCatalogs(api, [catalog], catalog.id);
+    await openText(projectUri(api, 'test-fixtures/workspace-one/src/app.ts'));
+    api.openedFilesTree.provider.refresh();
+    let projectRefreshes = 0;
+    let configurationRefreshes = 0;
+    let fileRefreshes = 0;
+    const subscriptions = [
+      api.catalogs.projectProvider.onDidChangeTreeData(() => { projectRefreshes += 1; }),
+      api.catalogs.configurationProvider.onDidChangeTreeData(() => { configurationRefreshes += 1; }),
+      api.openedFilesTree.provider.onDidChangeTreeData(() => { fileRefreshes += 1; }),
+    ];
+    try {
+      await setGlobalSetting('window', 'autoDetectColorScheme', false);
+      for (const [uiTheme, kind, highContrast] of [
+        ['hc-black', vscode.ColorThemeKind.HighContrast, true],
+        ['hc-light', vscode.ColorThemeKind.HighContrastLight, true],
+        ['vs-dark', vscode.ColorThemeKind.Dark, false],
+        ['vs', vscode.ColorThemeKind.Light, false],
+      ] as const) {
+        const theme = themes.find((candidate) => candidate.uiTheme === uiTheme);
+        assert.ok(theme);
+        const before = [projectRefreshes, configurationRefreshes, fileRefreshes];
+        await setGlobalSetting('workbench', 'colorTheme', theme.id);
+        await waitUntil(() => vscode.window.activeColorTheme.kind === kind
+          && projectRefreshes > before[0]! && configurationRefreshes > before[1]! && fileRefreshes > before[2]!,
+        `主题 ${theme.id} 未刷新三个树视图`);
+        const summary = api.catalogs.projectProvider.getChildren()[0];
+        assert.ok(summary);
+        const projectIcon = api.catalogs.projectProvider.getTreeItem(summary).iconPath;
+        const configNode = api.catalogs.configurationProvider.getChildren()[0] as ConfigurationTreeNode;
+        const configIcon = api.catalogs.configurationProvider.getTreeItem(configNode).iconPath;
+        const fileNode = flattenOpenedFileTree(api.openedFilesTree.provider.getRootsForIntegrationTest())
+          .find((node) => node.kind === 'file');
+        assert.ok(fileNode);
+        const fileItem = api.openedFilesTree.provider.getTreeItem(fileNode);
+        if (highContrast) {
+          assert.ok(projectIcon instanceof vscode.ThemeIcon);
+          assert.ok(configIcon instanceof vscode.ThemeIcon);
+          assert.equal(fileItem.iconPath, undefined);
+          assert.ok(fileItem.resourceUri);
+        } else {
+          assert.ok(isTreeIconPath(projectIcon));
+          assert.ok(isTreeIconPath(configIcon));
+          assert.ok(isTreeIconPath(fileItem.iconPath));
+        }
+        assert.equal(getPersonalConfiguration('projectManager.visuals').get('iconStyle'), 'unified');
+      }
+    } finally {
+      subscriptions.forEach((subscription) => subscription.dispose());
+      await setGlobalSetting('workbench', 'colorTheme', previousTheme);
+      await setGlobalSetting('window', 'autoDetectColorScheme', previousAutoDetect);
+    }
+  });
+
 });
 
 function isTreeIconPath(value: unknown): boolean {

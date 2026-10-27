@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as vscode from 'vscode';
 import { buildExclusionPatterns, type ResourceKind } from './exclusionPatterns';
 import { getWorkspaceRelativePath } from '../shared/uri';
@@ -76,7 +77,7 @@ export class ExclusionService {
     try {
       for (const plan of plans.values()) {
         for (const [target, patterns] of plan.patterns) {
-          const configuration = vscode.workspace.getConfiguration(target.section, plan.folder.uri);
+          const configuration = getPersonalConfiguration(target.section, plan.folder.uri);
           const inspection = configuration.inspect<ExcludeSetting>(target.key);
           const before = inspection?.workspaceFolderValue;
           const next: Record<string, ExcludeSettingValue> = { ...(before ?? {}) };
@@ -175,8 +176,7 @@ export class ExclusionService {
   }
 
   private async confirm(resourceCount: number): Promise<boolean> {
-    const shouldConfirm = vscode.workspace
-      .getConfiguration('projectManager.exclusions')
+    const shouldConfirm = getPersonalConfiguration('projectManager.exclusions')
       .get<boolean>('confirmBeforeApply', true);
 
     if (!shouldConfirm) {

@@ -46,6 +46,27 @@ describe('统一图标语义映射', () => {
     );
   });
 
+  it('条件编译分支按完整指令选择图标且不影响同名普通符号', () => {
+    for (const [name, semantic] of [
+      ['#elif defined(USE_TCP)', 'symbol.preprocessor-branch'],
+      ['#  elif ENABLED', 'symbol.preprocessor-branch'],
+      ['#else', 'symbol.preprocessor-else'],
+      ['# else // fallback', 'symbol.preprocessor-else'],
+      ['#ifdef ENABLED', 'symbol.preprocessor-region'],
+      ['#ifndef ENABLED', 'symbol.preprocessor-region'],
+      ['#if ENABLED', 'symbol.preprocessor-region'],
+      ['#elsewhere', 'symbol.preprocessor-region'],
+    ]) {
+      assert.equal(getSymbolIconMetadata('PreprocessorBranch', name).semantic, semantic);
+    }
+    assert.equal(getSymbolIconMetadata('Function', '#else').semantic, 'symbol.function');
+    for (const theme of ['light', 'dark', 'highContrast'] as const) {
+      const resource = resolveIconResource('symbol.preprocessor-else', theme);
+      assert.equal(resource.assetId, 'symbol-macro-definition');
+      assert.ok(fs.existsSync(path.join(projectRoot, resource.relativePath)));
+    }
+  });
+
   it('未知或未来新增的符号类型安全回退', () => {
     const metadata = getSymbolIconMetadata('FutureSymbolKind');
     assert.deepEqual(metadata, {
@@ -78,8 +99,8 @@ describe('统一图标语义映射', () => {
     );
   });
 
-  it('每种已知符号使用独立资产，只有未知类型使用通用图标', () => {
-    const kinds = [...STANDARD_SYMBOL_KIND_NAMES, ...SYNTHETIC_SYMBOL_KIND_NAMES];
+  it('普通符号使用独立资产，条件编译的通用回退使用井号', () => {
+    const kinds = [...STANDARD_SYMBOL_KIND_NAMES, 'MacroDefinition'];
     const resources = kinds.map((kind) =>
       resolveIconResource(getSymbolIconMetadata(kind).semantic, 'light'));
 
@@ -87,11 +108,11 @@ describe('统一图标语义映射', () => {
     assert.equal(new Set(resources.map((resource) => resource.assetId)).size, kinds.length);
     assert.equal(
       resolveIconResource('symbol.preprocessor-region', 'light').assetId,
-      'symbol-preprocessor-region',
+      'symbol-macro-definition',
     );
     assert.equal(
       resolveIconResource('symbol.preprocessor-branch', 'light').assetId,
-      'symbol-preprocessor-branch',
+      'symbol-macro-definition',
     );
     assert.equal(
       resolveIconResource('symbol.macro-definition', 'light').assetId,

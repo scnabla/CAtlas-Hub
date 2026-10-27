@@ -1,3 +1,4 @@
+import { getPersonalConfiguration, onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 根据当前工作区判断外部文件，提供文件装饰、状态栏和查看入口，不依赖必须创建项目集合。
  * FileDecoration 的颜色、标记和提示由 VS Code 决定实际显示位置，不能控制标签边框或任意字体样式。
@@ -37,7 +38,7 @@ export class ExternalFileMonitor implements vscode.FileDecorationProvider, vscod
       vscode.workspace.onDidCloseTextDocument((document) => this.refresh([document.uri])),
       vscode.window.onDidChangeActiveTextEditor(() => this.updateStatusBar()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.refreshAll()),
-      vscode.workspace.onDidChangeConfiguration((event) => {
+      onDidChangePersonalConfiguration((event) => {
         if (event.affectsConfiguration('projectManager.externalFiles')) {
           this.refreshAll();
         }
@@ -52,7 +53,7 @@ export class ExternalFileMonitor implements vscode.FileDecorationProvider, vscod
       return undefined;
     }
 
-    const configuration = vscode.workspace.getConfiguration('projectManager.externalFiles');
+    const configuration = getPersonalConfiguration('projectManager.externalFiles');
     const showBadge = configuration.get<boolean>('showBadge', true);
     const showColor = configuration.get<boolean>('showColor', true);
     const decoration = new vscode.FileDecoration(
@@ -125,8 +126,7 @@ export class ExternalFileMonitor implements vscode.FileDecorationProvider, vscod
 
     const folders = vscode.workspace.workspaceFolders ?? [];
     const owningFolder = vscode.workspace.getWorkspaceFolder(uri);
-    const enabled = vscode.workspace
-      .getConfiguration('projectManager.externalFiles')
+    const enabled = getPersonalConfiguration('projectManager.externalFiles')
       .get<boolean>('enabled', true);
     const external = this.isExternalFile(uri);
     const result = external
@@ -152,7 +152,7 @@ export class ExternalFileMonitor implements vscode.FileDecorationProvider, vscod
   }
 
   private isExternalFile(uri: vscode.Uri): boolean {
-    const configuration = vscode.workspace.getConfiguration('projectManager.externalFiles');
+    const configuration = getPersonalConfiguration('projectManager.externalFiles');
     if (!configuration.get<boolean>('enabled', true)) {
       return false;
     }
@@ -200,7 +200,7 @@ export class ExternalFileMonitor implements vscode.FileDecorationProvider, vscod
   }
 
   private updateStatusBar(): void {
-    const configuration = vscode.workspace.getConfiguration('projectManager.externalFiles');
+    const configuration = getPersonalConfiguration('projectManager.externalFiles');
     const activeUri = vscode.window.activeTextEditor?.document.uri;
 
     const activeFileIsExternal = activeUri !== undefined && this.isExternalFile(activeUri);

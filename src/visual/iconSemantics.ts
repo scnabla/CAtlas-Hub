@@ -112,6 +112,7 @@ const SYMBOL_KIND_LABELS = {
 export type SymbolIconSemantic =
   | typeof STANDARD_SYMBOL_SEMANTICS[StandardSymbolKindName]
   | typeof SYNTHETIC_SYMBOL_SEMANTICS[SyntheticSymbolKindName]
+  | 'symbol.preprocessor-else'
   | 'symbol.unknown';
 
 export type ObjectIconSemantic =
@@ -179,8 +180,6 @@ export type BaselineIconAssetId =
   | 'symbol-event'
   | 'symbol-operator'
   | 'symbol-type-parameter'
-  | 'symbol-preprocessor-region'
-  | 'symbol-preprocessor-branch'
   | 'symbol-macro-definition';
 
 export type StateIconAssetId = 'warning' | 'edited' | 'long-function' | 'disabled';
@@ -246,8 +245,9 @@ const AVAILABLE_BASELINE_ASSETS: Readonly<Partial<Record<IconSemantic, BaselineI
   'symbol.event': 'symbol-event',
   'symbol.operator': 'symbol-operator',
   'symbol.type-parameter': 'symbol-type-parameter',
-  'symbol.preprocessor-region': 'symbol-preprocessor-region',
-  'symbol.preprocessor-branch': 'symbol-preprocessor-branch',
+  'symbol.preprocessor-region': 'symbol-macro-definition',
+  'symbol.preprocessor-branch': 'symbol-macro-definition',
+  'symbol.preprocessor-else': 'symbol-macro-definition',
   'symbol.macro-definition': 'symbol-macro-definition',
   'symbol.unknown': 'symbol-generic',
 };
@@ -268,7 +268,7 @@ export function isKnownSymbolKindName(kind: string): kind is KnownSymbolKindName
   return KNOWN_SYMBOL_KIND_SET.has(kind);
 }
 
-export function getSymbolIconMetadata(kind: string): SymbolIconMetadata {
+export function getSymbolIconMetadata(kind: string, name?: string): SymbolIconMetadata {
   if (!isKnownSymbolKindName(kind)) {
     return {
       kind: 'Unknown',
@@ -278,10 +278,16 @@ export function getSymbolIconMetadata(kind: string): SymbolIconMetadata {
     };
   }
 
+  let semantic = KNOWN_SYMBOL_SEMANTICS[kind];
+  if (kind === 'PreprocessorBranch' && name !== undefined) {
+    semantic = 'symbol.preprocessor-region';
+    if (/^#\s*elif\b/.test(name)) semantic = 'symbol.preprocessor-branch';
+    if (/^#\s*else\b/.test(name)) semantic = 'symbol.preprocessor-else';
+  }
   return {
     kind,
     label: SYMBOL_KIND_LABELS[kind],
-    semantic: KNOWN_SYMBOL_SEMANTICS[kind],
+    semantic,
     known: true,
   };
 }

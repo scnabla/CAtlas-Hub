@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 标签配置的统一取值入口，同时返回来源供配置栏解释。
  * 优先级依次为工作区显式设置、集合设置、全局显式设置、旧版个人设置、默认值。
@@ -21,12 +22,12 @@ export interface EffectiveTabSettings {
 export function resolveEffectiveTabSettings(
   catalogSettings: CatalogTabSettings | undefined,
 ): EffectiveTabSettings {
-  const configuration = vscode.workspace.getConfiguration('projectManager.tabs');
+  const configuration = getPersonalConfiguration('projectManager.tabs');
   const inspected = configuration.inspect<boolean>('autoOrganize');
   const workspaceAutoOrganize = inspected?.workspaceFolderValue ?? inspected?.workspaceValue;
   const globalAutoOrganize = inspected?.globalValue;
   const legacyMode = getExplicitValue<string>(
-    vscode.workspace.getConfiguration('projectManager.tabs.grouping'),
+    getPersonalConfiguration('projectManager.tabs.grouping'),
     'action',
   );
   const legacyAutoOrganize = legacyMode === undefined ? undefined : legacyMode === 'auto';

@@ -1,7 +1,6 @@
 import * as assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { fromBuffer } from 'yauzl';
 import * as path from 'node:path';
-import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
 import { createStoredCatalog } from '../projectCatalog/catalogStore';
@@ -19,7 +18,7 @@ suite('构建、错误隔离、安全与性能', () => {
   });
 
   test('INT-156 Manifest 贡献命令与运行时命令一致', async () => {
-    const extension = vscode.extensions.getExtension('scnable.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
     assert.ok(extension);
     const contributed = (extension.packageJSON.contributes.commands as Array<{ command: string }>).map((item) => item.command);
     const runtime = new Set(await vscode.commands.getCommands(true));
@@ -38,8 +37,19 @@ suite('构建、错误隔离、安全与性能', () => {
     assert.ok((await vscode.workspace.fs.stat(vsix)).size > 0);
     const bytes = await vscode.workspace.fs.readFile(vsix);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), process.env.PROJECT_BUTLER_TEST_SHA256);
-    const { stdout } = await promisify(execFile)('tar.exe', ['-tf', vsix.fsPath]);
-    const entries = stdout.split(/\r?\n/u).filter(Boolean);
+    const entries = await new Promise<string[]>((resolve, reject) => {
+      fromBuffer(Buffer.from(bytes), { lazyEntries: true }, (error, zip) => {
+        if (error) return reject(error);
+        const names: string[] = [];
+        zip.on('error', reject);
+        zip.on('entry', (entry) => {
+          names.push(entry.fileName);
+          zip.readEntry();
+        });
+        zip.on('end', () => resolve(names));
+        zip.readEntry();
+      });
+    });
     const forbidden = [
       'extension/src/',
       'extension/test-fixtures/',
@@ -79,7 +89,7 @@ suite('构建、错误隔离、安全与性能', () => {
   });
 
   test('INT-163 具有删除或重命名语义的命令均限定到安全对象', () => {
-    const extension = vscode.extensions.getExtension('scnable.catlas-hub')!;
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub')!;
     const commands = (extension.packageJSON.contributes.commands as Array<{ command: string }>).map((item) => item.command.toLocaleLowerCase());
     const allowedScopedMutationCommands = new Set([
       'projectmanager.renamecatalog',

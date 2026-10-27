@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -44,21 +45,25 @@ suite('测试基础设施、上下文与项目集合生命周期', () => {
   });
 
   test('INT-005 未加载非内置第三方扩展', () => {
-    const unexpected = vscode.extensions.all.filter((extension) => extension.id !== 'scnable.catlas-hub'
-      && !extension.extensionPath.toLocaleLowerCase().includes('.vscode-test'));
+    const builtinRoot = path.join(vscode.env.appRoot, 'extensions');
+    const unexpected = vscode.extensions.all.filter((extension) => {
+      if (extension.id === 'scnabla.catlas-hub') return false;
+      const relative = path.relative(builtinRoot, extension.extensionPath);
+      return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+    });
     assert.deepEqual(unexpected.map((extension) => extension.id), []);
   });
 
   test('INT-006 当前 VS Code 满足 engines.vscode', async () => {
     const api = await getApi();
-    const required = String(vscode.extensions.getExtension('scnable.catlas-hub')?.packageJSON.engines.vscode);
+    const required = String(vscode.extensions.getExtension('scnabla.catlas-hub')?.packageJSON.engines.vscode);
     assert.equal(required, '^1.88.0');
     assert.ok(Number(vscode.version.split('.')[0]) >= 1 && Number(vscode.version.split('.')[1]) >= 88);
     assert.notEqual(api.context.extensionMode, vscode.ExtensionMode.Production);
   });
 
   test('INT-007 Manifest 声明 onStartupFinished 自动激活', () => {
-    const extension = vscode.extensions.getExtension('scnable.catlas-hub');
+    const extension = vscode.extensions.getExtension('scnabla.catlas-hub');
     assert.ok(extension);
     assert.ok((extension.packageJSON.activationEvents as string[]).includes('onStartupFinished'));
     assert.equal(extension.isActive, true);
@@ -200,7 +205,8 @@ suite('测试基础设施、上下文与项目集合生命周期', () => {
     const second = createStoredCatalog('集合二');
     await seedCatalogs(api, [first, second], second.id);
     assert.equal(api.catalogs.service.current?.name, '集合二');
-    assert.equal(api.catalogs.configurationView.description, '集合二');
+    assert.equal(api.catalogs.projectProvider.getTreeItem({ kind: 'summary' }).label, '集合二');
+    assert.equal(api.catalogs.configurationView.description, '');
   });
 
   test('INT-058 退出当前集合保留内部集合库', async () => {
@@ -273,14 +279,16 @@ suite('测试基础设施、上下文与项目集合生命周期', () => {
     assert.match(item.tooltip instanceof vscode.MarkdownString ? item.tooltip.value : String(item.tooltip), /集成测试项目/);
   });
 
-  test('INT-066 集合外项目上下文节点明确显示集合外', async () => {
+  test('INT-066 集合外项目显示当前工作区名称且不附加配置说明', async () => {
     const api = await getApi();
     const catalog = createStoredCatalog('外部集合');
     await seedCatalogs(api, [catalog], catalog.id);
     const nodes = api.catalogs.projectProvider.getChildren();
-    const contextNode = nodes.find((node) => 'kind' in node && node.kind === 'context');
+    const contextNode = api.catalogs.projectProvider.getChildren(nodes[0]).find((node) => 'kind' in node && node.kind === 'context');
     assert.ok(contextNode);
-    assert.match(String(api.catalogs.projectProvider.getTreeItem(contextNode).label), /集合外/);
+    const item = api.catalogs.projectProvider.getTreeItem(contextNode);
+    assert.equal(item.label, `当前项目：${vscode.workspace.name ?? vscode.workspace.workspaceFolders?.[0]?.name}`);
+    assert.equal(item.description, undefined);
   });
 
   test('INT-067 失效项目保留条目并显示警告', async () => {
@@ -300,8 +308,8 @@ suite('测试基础设施、上下文与项目集合生命周期', () => {
     ['INT-070', 'currentWindow', 'currentWindow'],
   ] as const) {
     test(`${id} 项目打开方式配置可解析为 ${expected}`, async () => {
-      await vscode.workspace.getConfiguration('projectManager.projectCatalog').update('openMode', configured, vscode.ConfigurationTarget.Global);
-      assert.equal(vscode.workspace.getConfiguration('projectManager.projectCatalog').get('openMode'), expected);
+      await getPersonalConfiguration('projectManager.projectCatalog').update('openMode', configured, vscode.ConfigurationTarget.Global);
+      assert.equal(getPersonalConfiguration('projectManager.projectCatalog').get('openMode'), expected);
     });
   }
 
@@ -538,8 +546,19 @@ suite('测试基础设施、上下文与项目集合生命周期', () => {
     await seedCatalogs(api, [catalog], catalog.id);
     const nodes = api.catalogs.projectProvider.getChildren();
     assert.equal(api.catalogs.projectProvider.getTreeItem(nodes[0]!).contextValue, 'projectCatalog.summary');
-    assert.equal(api.catalogs.projectProvider.getTreeItem(nodes[2]!).contextValue, 'projectCatalog.availableProject');
-    assert.equal(api.catalogs.projectProvider.getTreeItem(nodes[3]!).contextValue, 'projectCatalog.invalidProject');
+    assert.equal(nodes.length, 1);
+    assert.equal(api.catalogs.projectProvider.getTreeItem(nodes[0]!).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+    const children = api.catalogs.projectProvider.getChildren(nodes[0]);
+    assert.equal(children.length, 3);
+    const current = api.catalogs.projectProvider.getTreeItem(children[0]!);
+    assert.equal(current.label, '当前项目：有效');
+    assert.equal(current.description, undefined);
+    assert.equal(api.catalogs.projectProvider.getParent(children[0]!), nodes[0]);
+    assert.equal(api.catalogs.projectProvider.getParent(children[1]!), nodes[0]);
+    assert.deepEqual(api.catalogs.projectProvider.getChildren(children[1]), []);
+    await api.catalogs.projectView.reveal(children[1]!, { select: true, focus: false });
+    assert.equal(api.catalogs.projectProvider.getTreeItem(children[1]!).contextValue, 'projectCatalog.availableProject');
+    assert.equal(api.catalogs.projectProvider.getTreeItem(children[2]!).contextValue, 'projectCatalog.invalidProject');
     const commands = await vscode.commands.getCommands(true);
     for (const command of [
       'projectManager.renameCatalog',

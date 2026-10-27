@@ -1,3 +1,4 @@
+import { getPersonalConfiguration, onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 增强大纲协调层：获取语言服务符号，补充条件编译信息，再转换为 Webview 展示与跳转数据。
  * 与 symbolModel、outlineEnhancements、webviewHtml 分工；前后端消息名称和字段需要同步修改。
@@ -22,6 +23,7 @@ import {
   findCurrentSymbol,
   flattenSymbols,
   getOutlineDisplayName,
+  getOutlineSymbolPresentation,
   OutlineHierarchy,
   OutlineRange,
   OutlineScope,
@@ -34,6 +36,7 @@ import { enhanceOutlineSymbols } from './outlineEnhancements';
 import { hasVscodeCommand } from '../platform/vscodeCapabilities';
 import { getIconResourceRoot } from '../visual/webviewIconResources';
 import { IconStyle, normalizeIconStyle } from '../visual/iconStyle';
+import { getSymbolIconMetadata, SymbolIconSemantic } from '../visual/iconSemantics';
 
 type OutlineAppearance = 'vscode' | 'sourceInsightLight' | 'sourceInsightBlack';
 type OutlineStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'excluded' | 'unsupported' | 'error';
@@ -57,6 +60,13 @@ interface CachedSymbols {
   symbols: OutlineSymbol[];
 }
 
+export interface OutlineViewSymbol extends OutlineSymbol {
+  directive: string;
+  displayName: string;
+  iconSemantic: SymbolIconSemantic;
+  children: OutlineViewSymbol[];
+}
+
 export interface OutlineViewState {
   status: OutlineStatus;
   message: string;
@@ -70,7 +80,7 @@ export interface OutlineViewState {
   currentId: string;
   totalCount: number;
   visibleCount: number;
-  symbols: OutlineSymbol[];
+  symbols: OutlineViewSymbol[];
   preferences: OutlinePreferences;
   nativeOutlineNotice: boolean;
   nativeOutlineNoticeExpanded: boolean;
@@ -134,7 +144,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       vscode.workspace.onDidChangeTextDocument((event) => this.handleDocumentChanged(event)),
       vscode.workspace.onDidSaveTextDocument((document) => this.handleDocumentSaved(document)),
       vscode.workspace.onDidCloseTextDocument((document) => this.handleDocumentClosed(document)),
-      vscode.workspace.onDidChangeConfiguration((event) => this.handleConfigurationChanged(event)),
+      onDidChangePersonalConfiguration((event) => this.handleConfigurationChanged(event)),
       catalogService.onDidChange(() => this.handleCatalogChanged()),
     );
   }
@@ -325,12 +335,12 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     ];
     const selected = await vscode.window.showQuickPick(choices, {
       title: '选择函数大纲外观',
-      placeHolder: '外观会立即应用，并保存到 VS Code 本机设置',
+      placeHolder: '选择大纲外观',
     });
     if (selected === undefined || selected.value === current) {
       return;
     }
-    await vscode.workspace.getConfiguration('projectManager.symbolOutline')
+    await getPersonalConfiguration('projectManager.symbolOutline')
       .update('appearance', selected.value, vscode.ConfigurationTarget.Global);
   }
 
@@ -341,7 +351,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       {
         label: '$(list-tree) 仅使用增强大纲',
         ...(current === 'enhanced' ? { description: '当前使用' } : {}),
-        detail: '增强大纲默认显示在“CAtlas Hub”插件侧栏；面板内会常驻提示如何手动隐藏原生大纲。',
+        detail: '显示增强大纲；原生大纲需手动隐藏。',
         value: 'enhanced',
       },
       {
@@ -360,8 +370,8 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     const selected = await vscode.window.showQuickPick(choices, {
       title: editsCatalog ? '项目集合：选择大纲模式' : '个人偏好：选择大纲模式',
       placeHolder: editsCatalog
-        ? '保存到当前项目集合配置文件，可随集合复制'
-        : '当前窗口不是集合内项目，保存为全局个人默认值',
+        ? '修改当前集合的大纲模式'
+        : '修改个人默认的大纲模式',
     });
     if (selected === undefined || selected.value === current) {
       return;
@@ -373,7 +383,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
   }
 
   private get preferences(): OutlinePreferences {
-    const configuration = vscode.workspace.getConfiguration('projectManager.symbolOutline');
+    const configuration = getPersonalConfiguration('projectManager.symbolOutline');
     return {
       mode: resolveEffectiveOutlineMode(this.catalogService.currentProjectSymbolOutlineSettings).mode,
       followActiveEditor: true,
@@ -386,7 +396,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       highlightEditedSymbols: configuration.get<boolean>('highlightEditedSymbols', true),
       scale: clamp(configuration.get<number>('scale', 100), 90, 150),
       iconStyle: normalizeIconStyle(
-        vscode.workspace.getConfiguration('projectManager.visuals').get<unknown>('iconStyle'),
+        getPersonalConfiguration('projectManager.visuals').get<unknown>('iconStyle'),
       ),
     };
   }
@@ -587,7 +597,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       this.sourceViewColumn = editor?.viewColumn;
     }
 
-    await vscode.workspace.getConfiguration('projectManager.symbolOutline')
+    await getPersonalConfiguration('projectManager.symbolOutline')
       .update('followActiveEditor', next, vscode.ConfigurationTarget.Global);
   }
 
@@ -608,14 +618,14 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     }
 
     if (key === 'scale' && typeof value === 'number' && Number.isFinite(value)) {
-      await vscode.workspace.getConfiguration('projectManager.symbolOutline')
+      await getPersonalConfiguration('projectManager.symbolOutline')
         .update(key, clamp(Math.round(value), 90, 150), vscode.ConfigurationTarget.Global);
       return;
     }
     if (!(key in allowed) || !allowed[key]?.includes(value)) {
       return;
     }
-    await vscode.workspace.getConfiguration('projectManager.symbolOutline')
+    await getPersonalConfiguration('projectManager.symbolOutline')
       .update(key, value, vscode.ConfigurationTarget.Global);
   }
 
@@ -705,7 +715,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     const webview = view.webview;
 
     const state = this.createState(document);
-    view.description = '当前活动文件';
+    view.description = '';
     await webview.postMessage({ type: 'state', state });
   }
 
@@ -744,7 +754,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       currentId: current?.id ?? '',
       totalCount: countSymbols(this.currentSymbols),
       visibleCount: countSymbols(symbols),
-      symbols,
+      symbols: symbols.map(withIconSemantic),
       preferences,
       nativeOutlineNotice: isNativeOutlineNoticeVisible(preferences.mode),
       nativeOutlineNoticeExpanded: this.context.workspaceState.get<boolean>(NATIVE_NOTICE_EXPANDED_KEY, true),
@@ -774,6 +784,15 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
   }
 }
 
+function withIconSemantic(symbol: OutlineSymbol): OutlineViewSymbol {
+  return {
+    ...symbol,
+    iconSemantic: getSymbolIconMetadata(symbol.kind, symbol.name).semantic,
+    ...getOutlineSymbolPresentation(symbol.kind, symbol.name),
+    children: symbol.children.map(withIconSemantic),
+  };
+}
+
 class LegacyOutlineMigrationViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private readonly messageSubscription: vscode.Disposable[] = [];
 
@@ -799,7 +818,7 @@ class LegacyOutlineMigrationViewProvider implements vscode.WebviewViewProvider, 
 <body>
   <div class="notice">
     <strong>增强函数大纲已迁移</strong>
-    <p>完整大纲现在位于“CAtlas Hub”插件侧栏。此资源管理器视图仅用于帮助已有用户找到新位置。</p>
+    <p>增强函数大纲位于“CAtlas Hub”侧栏。</p>
     <button id="open">打开CAtlas Hub中的增强大纲</button>
   </div>
   <script nonce="${nonce}">
@@ -841,7 +860,7 @@ export function registerSymbolOutline(
       webviewOptions: { retainContextWhenHidden: true },
     }),
     catalogService.onDidChange(updateModeContext),
-    vscode.workspace.onDidChangeConfiguration((event) => {
+    onDidChangePersonalConfiguration((event) => {
       if (event.affectsConfiguration('projectManager.symbolOutline.mode')) {
         updateModeContext();
       }
@@ -873,7 +892,7 @@ export function registerSymbolOutline(
 async function updateOutlineMode(mode: OutlineMode, catalogService: ProjectFeatureConfigurationSource): Promise<void> {
   const updatedCatalog = await catalogService.updateCurrentOutlineMode(mode);
   if (!updatedCatalog) {
-    await vscode.workspace.getConfiguration('projectManager.symbolOutline')
+    await getPersonalConfiguration('projectManager.symbolOutline')
       .update('mode', mode, vscode.ConfigurationTarget.Global);
   }
   const effectiveMode = getOutlineMode(catalogService);
@@ -1051,8 +1070,7 @@ function findMatchingFilesExclude(document: vscode.TextDocument): string | undef
   if (folder === undefined) {
     return undefined;
   }
-  const excludes = vscode.workspace
-    .getConfiguration('files', document.uri)
+  const excludes = getPersonalConfiguration('files', document.uri)
     .get<Readonly<Record<string, boolean | { readonly when: string }>>>('exclude', {});
 
   for (const [pattern, value] of Object.entries(excludes)) {

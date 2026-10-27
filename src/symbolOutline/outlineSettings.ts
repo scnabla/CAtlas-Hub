@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as vscode from 'vscode';
 import {
   CatalogSymbolOutlineSettings,
@@ -15,7 +16,7 @@ export interface EffectiveOutlineMode {
 export function resolveEffectiveOutlineMode(
   catalogSettings: CatalogSymbolOutlineSettings | undefined,
 ): EffectiveOutlineMode {
-  const configuration = vscode.workspace.getConfiguration('projectManager.symbolOutline');
+  const configuration = getPersonalConfiguration('projectManager.symbolOutline');
   const inspected = configuration.inspect<OutlineMode>('mode');
   const workspaceMode = inspected?.workspaceFolderValue ?? inspected?.workspaceValue;
   if (workspaceMode === 'native' || workspaceMode === 'enhanced' || workspaceMode === 'both') {

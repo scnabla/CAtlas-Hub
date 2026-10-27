@@ -1,3 +1,4 @@
+import { getPersonalConfiguration, onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * TODO 功能的协调入口：共用一个 TodoIndex，连接后台扫描、文档编辑、文件监听、标记命令和视图。
  * 全量刷新通过单个 refreshLoop 串行执行；文件增量更新由 TodoUpdateQueue 合并并限制并发。
@@ -322,7 +323,7 @@ export function registerTodo(
     if (featureSource.projectContext.kind === 'member') {
       await featureSource.updateCurrentTodoTags(tags);
     } else {
-      await vscode.workspace.getConfiguration('projectManager.todo').update('tags', tags, vscode.ConfigurationTarget.Global);
+      await getPersonalConfiguration('projectManager.todo').update('tags', tags, vscode.ConfigurationTarget.Global);
     }
   };
 
@@ -338,7 +339,7 @@ export function registerTodo(
     if (featureSource.projectContext.kind === 'member') {
       await featureSource.updateCurrentTodoTags(next);
     } else {
-      await vscode.workspace.getConfiguration('projectManager.todo').update('tags', next, vscode.ConfigurationTarget.Global);
+      await getPersonalConfiguration('projectManager.todo').update('tags', next, vscode.ConfigurationTarget.Global);
     }
   };
 
@@ -450,7 +451,7 @@ export function registerTodo(
         void refresh();
       }
     }),
-    vscode.workspace.onDidChangeConfiguration((event) => {
+    onDidChangePersonalConfiguration((event) => {
       if (!['projectManager.todo', 'files.exclude', 'search.exclude', 'files.encoding', 'files.associations']
         .some((key) => event.affectsConfiguration(key))) return;
       handleEffectiveSettingsChange();

@@ -2,17 +2,17 @@
   "name": "catlas-hub",
   "displayName": "CAtlas Hub",
   "description": "增强 VS Code 的项目切换、代码浏览、标签组织和便携开发设置。",
-  "version": "1.0.0",
-  "publisher": "scnable",
+  "version": "1.0.1",
+  "publisher": "scnabla",
   "license": "MIT",
   "icon": "media/catlas-hub.png",
-  "homepage": "https://github.com/scnable/project-butler#readme",
+  "homepage": "https://github.com/scnabla/project-butler#readme",
   "bugs": {
-    "url": "https://github.com/scnable/project-butler/issues"
+    "url": "https://github.com/scnabla/project-butler/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/scnable/project-butler.git"
+    "url": "https://github.com/scnabla/project-butler.git"
   },
   "engines": {
     "vscode": "^1.88.0"
@@ -117,24 +117,16 @@
     "viewsWelcome": [
       {
         "view": "projectManager.projectsView",
-        "contents": "尚无项目集合。\n[添加项目并创建集合](command:projectManager.addProjectToCatalog)\n[导入已有集合](command:projectManager.importCatalog)\n\n集合、项目别名和功能配置由插件内部管理，不需要创建或编辑配置文件。迁移到其他设备时使用导入、导出。",
+        "contents": "尚无项目集合。\n[添加项目并创建集合](command:projectManager.addProjectToCatalog)\n[修改项目集合数据保存位置](command:projectManager.changeDataLocation)",
         "when": "!projectManager.hasCatalogs && !projectManager.catalogInitializing"
       },
       {
         "view": "projectManager.projectsView",
-        "contents": "当前未选择项目集合。\n[选择已有集合](command:projectManager.selectCatalog)\n[添加项目到集合](command:projectManager.addProjectToCatalog)\n[导入其他集合](command:projectManager.importCatalog)",
+        "contents": "当前未选择项目集合。\n[选择项目集合](command:projectManager.selectCatalog)\n[添加项目到集合](command:projectManager.addProjectToCatalog)",
         "when": "projectManager.hasCatalogs && !projectManager.hasActiveCatalog && !projectManager.catalogInitializing"
       }
     ],
     "commands": [
-      {
-        "command": "projectManager.exportIdentityMigration",
-        "title": "CAtlas Hub: 导出到正式版迁移文件"
-      },
-      {
-        "command": "projectManager.importIdentityMigration",
-        "title": "CAtlas Hub: 导入旧身份迁移文件"
-      },
       {
         "command": "projectManager.organizeCurrentTabGroup",
         "title": "CAtlas Hub: 将非项目标签移到末尾",
@@ -223,24 +215,6 @@
         "icon": "$(library)"
       },
       {
-        "command": "projectManager.importCatalog",
-        "title": "CAtlas Hub: 导入项目集合",
-        "category": "CAtlas Hub",
-        "icon": "$(cloud-download)"
-      },
-      {
-        "command": "projectManager.importLegacyCatalog",
-        "title": "CAtlas Hub: 导入旧项目集合",
-        "category": "CAtlas Hub",
-        "icon": "$(history)"
-      },
-      {
-        "command": "projectManager.exportCatalog",
-        "title": "CAtlas Hub: 导出项目集合",
-        "category": "CAtlas Hub",
-        "icon": "$(cloud-upload)"
-      },
-      {
         "command": "projectManager.exitCatalog",
         "title": "CAtlas Hub: 退出当前项目集合",
         "category": "CAtlas Hub",
@@ -253,34 +227,10 @@
         "icon": "$(settings-gear)"
       },
       {
-        "command": "projectManager.createCatalogTemplate",
-        "title": "CAtlas Hub: 添加项目并创建集合（兼容入口）",
-        "category": "CAtlas Hub",
-        "icon": "$(new-file)"
-      },
-      {
-        "command": "projectManager.openCatalogFile",
-        "title": "CAtlas Hub: 导入项目集合文件（兼容入口）",
-        "category": "CAtlas Hub",
-        "icon": "$(folder-opened)"
-      },
-      {
-        "command": "projectManager.openCatalogSource",
-        "title": "CAtlas Hub: 说明当前集合存储方式",
-        "category": "CAtlas Hub",
-        "icon": "$(json)"
-      },
-      {
         "command": "projectManager.refreshProjects",
         "title": "CAtlas Hub: 刷新项目集合",
         "category": "CAtlas Hub",
         "icon": "$(refresh)"
-      },
-      {
-        "command": "projectManager.closeCatalog",
-        "title": "CAtlas Hub: 退出当前项目集合（兼容入口）",
-        "category": "CAtlas Hub",
-        "icon": "$(close)"
       },
       {
         "command": "projectManager.openSettings",
@@ -485,6 +435,12 @@
         "command": "projectManager.todo.configureShortcuts",
         "title": "CAtlas Hub: 设置快速标记快捷键",
         "category": "CAtlas Hub"
+      },
+      {
+        "command": "projectManager.changeDataLocation",
+        "title": "CAtlas Hub: 修改项目集合数据保存位置",
+        "category": "CAtlas Hub",
+        "icon": "$(folder-opened)"
       }
     ],
     "menus": {
@@ -563,36 +519,6 @@
           "group": "navigation@3"
         },
         {
-          "command": "projectManager.addProjectToCatalog",
-          "when": "view == projectManager.projectsView",
-          "group": "navigation@1"
-        },
-        {
-          "command": "projectManager.selectCatalog",
-          "when": "view == projectManager.projectsView",
-          "group": "navigation@2"
-        },
-        {
-          "command": "projectManager.importCatalog",
-          "when": "view == projectManager.projectsView",
-          "group": "navigation@3"
-        },
-        {
-          "command": "projectManager.exportCatalog",
-          "when": "view == projectManager.projectsView && projectManager.hasCatalogs",
-          "group": "navigation@4"
-        },
-        {
-          "command": "projectManager.refreshProjects",
-          "when": "view == projectManager.projectsView && projectManager.hasActiveCatalog",
-          "group": "navigation@5"
-        },
-        {
-          "command": "projectManager.exitCatalog",
-          "when": "view == projectManager.projectsView && projectManager.hasActiveCatalog",
-          "group": "navigation@6"
-        },
-        {
           "command": "projectManager.openSettings",
           "when": "false",
           "group": "navigation@6"
@@ -661,6 +587,31 @@
           "command": "projectManager.todo.addTag",
           "when": "view == projectManager.todoView",
           "group": "navigation@6"
+        },
+        {
+          "command": "projectManager.addProjectToCatalog",
+          "when": "view == projectManager.projectsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "projectManager.selectCatalog",
+          "when": "view == projectManager.projectsView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "projectManager.changeDataLocation",
+          "when": "view == projectManager.projectsView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "projectManager.refreshProjects",
+          "when": "view == projectManager.projectsView && projectManager.hasActiveCatalog",
+          "group": "navigation@5"
+        },
+        {
+          "command": "projectManager.exitCatalog",
+          "when": "view == projectManager.projectsView && projectManager.hasActiveCatalog",
+          "group": "navigation@6"
         }
       ],
       "view/item/context": [
@@ -728,6 +679,11 @@
           "command": "projectManager.todo.unassignMine",
           "when": "view == projectManager.todoView && viewItem == projectManager.todo.result.mine",
           "group": "todoOwner@2"
+        },
+        {
+          "command": "projectManager.addProjectToCatalog",
+          "when": "view == projectManager.projectsView && viewItem == projectCatalog.summary",
+          "group": "projectCatalog@0"
         }
       ],
       "commandPalette": [
@@ -813,8 +769,8 @@
             "native"
           ],
           "enumDescriptions": [
-            "使用插件统一设计的领域 SVG 图标。",
-            "项目树、配置树和增强大纲尽量回退到 VS Code 原生 ThemeIcon/Codicon 风格。"
+            "使用简约彩色图标，以不同轮廓和颜色区分项目、文件和代码符号。",
+            "项目树和配置树使用 VS Code 原生图标，增强大纲使用单色符号。"
           ],
           "default": "unified",
           "scope": "window",
@@ -1047,6 +1003,7 @@
   "scripts": {
     "vscode:prepublish": "npm run icons:check && npm run compile",
     "icons:check": "node scripts/generate-icons.mjs --check",
+    "icons:export": "node scripts/export-marketplace-icon.mjs",
     "icons:generate": "node scripts/generate-icons.mjs --write",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
@@ -1060,14 +1017,17 @@
     "package:vsix": "node scripts/package-vsix.mjs"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.0.0",
     "@types/sinon": "^22.0.0",
     "@types/vscode": "1.88.0",
+    "@types/yauzl": "3.4.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "3.9.1",
     "sinon": "^22.1.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "yauzl": "3.4.0"
   }
 }

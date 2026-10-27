@@ -1,3 +1,4 @@
+import { getPersonalConfiguration, onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 import * as vscode from 'vscode';
 
 export type OpenedFilesViewMode = 'native' | 'directoryTree';
@@ -35,14 +36,14 @@ export class OpenedFilesViewModeService implements vscode.Disposable {
     private readonly output: vscode.OutputChannel,
     private readonly interaction: OpenedFilesViewInteraction = defaultInteraction,
   ) {
-    this.disposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
+    this.disposables.push(onDidChangePersonalConfiguration((event) => {
       if (event.affectsConfiguration('projectManager.tabs.openFilesView')) void this.applyMode(true);
     }));
     void this.applyMode(true);
   }
 
   public get mode(): OpenedFilesViewMode {
-    return vscode.workspace.getConfiguration('projectManager.tabs')
+    return getPersonalConfiguration('projectManager.tabs')
       .get<OpenedFilesViewMode>('openFilesView', 'directoryTree');
   }
 
@@ -116,7 +117,7 @@ export class OpenedFilesViewModeService implements vscode.Disposable {
       if (showMessage) await this.interaction.showInformation('没有由本插件隐藏、需要恢复的原生“打开的编辑器”设置。');
       return;
     }
-    const configuration = vscode.workspace.getConfiguration('explorer');
+    const configuration = getPersonalConfiguration('explorer');
     const inspected = configuration.inspect<number>('openEditors.visible');
     const currentExplicit = record.target === 'workspace' ? inspected?.workspaceValue : inspected?.globalValue;
     if (currentExplicit === record.writtenValue) {
@@ -163,7 +164,7 @@ export class OpenedFilesViewModeService implements vscode.Disposable {
         this.output.appendLine(`通过原生视图命令隐藏“打开的编辑器”失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    const configuration = vscode.workspace.getConfiguration('explorer');
+    const configuration = getPersonalConfiguration('explorer');
     if (configuration.get<number>('openEditors.visible') !== 0) {
       this.output.appendLine('未写入 explorer.openEditors.visible = 0：VS Code 公开配置模式规定该值最小为 1。');
       await this.showManualHideWarning('VS Code 的公开配置模式规定 explorer.openEditors.visible 的最小值为 1。');

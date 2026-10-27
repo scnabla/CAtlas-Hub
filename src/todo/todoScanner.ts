@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * 将候选文件搜索、文件读取和精确标记解析组合为扫描流程，并向唯一 TodoIndex 提交结果。
  * 打开的文档优先使用内存文本，不能用磁盘旧内容覆盖未保存编辑；全量结果先放入临时索引再合并。
@@ -571,8 +572,8 @@ export class TodoScanner {
 
   private excludeConfigurations(folder: vscode.WorkspaceFolder): readonly unknown[] {
     return [
-      vscode.workspace.getConfiguration('files', folder.uri).get<unknown>('exclude'),
-      vscode.workspace.getConfiguration('search', folder.uri).get<unknown>('exclude'),
+      getPersonalConfiguration('files', folder.uri).get<unknown>('exclude'),
+      getPersonalConfiguration('search', folder.uri).get<unknown>('exclude'),
     ];
   }
 
@@ -636,7 +637,7 @@ export class TodoScanner {
     const stat = await this.filesApi.stat(uri);
     if (stat.type !== vscode.FileType.File || stat.size > MAX_FILE_BYTES) return undefined;
     const bytes = await this.filesApi.readFile(uri);
-    const configuredEncoding = vscode.workspace.getConfiguration('files', uri).get<string>('encoding', 'utf8');
+    const configuredEncoding = getPersonalConfiguration('files', uri).get<string>('encoding', 'utf8');
     const decoded = decodeTodoText(bytes, configuredEncoding, vscode.env.language);
     if (decoded === undefined) return undefined;
     if (decoded.fallback) {

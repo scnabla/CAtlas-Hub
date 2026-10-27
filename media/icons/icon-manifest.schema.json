@@ -17,23 +17,59 @@
     "states"
   ],
   "properties": {
-    "$schema": { "type": "string" },
-    "version": { "const": 5 },
-    "grid": { "const": "24x24" },
-    "strokeWidth": { "type": "number", "minimum": 2.7 },
-    "cornerStyle": { "const": "round" },
-    "stateBadgeAnchor": { "const": "right-bottom" },
-    "sourceRoot": { "type": "string", "minLength": 1 },
-    "palette": { "type": "string", "minLength": 1 },
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 7
+    },
+    "grid": {
+      "const": "24x24"
+    },
+    "strokeWidth": {
+      "type": "number",
+      "minimum": 2,
+      "maximum": 2.4
+    },
+    "cornerStyle": {
+      "const": "round"
+    },
+    "stateBadgeAnchor": {
+      "const": "right-bottom"
+    },
+    "sourceRoot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "palette": {
+      "type": "string",
+      "minLength": 1
+    },
     "colorStrategy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "themes", "highContrast", "activityBar"],
+      "required": [
+        "role",
+        "themes",
+        "highContrast",
+        "activityBar"
+      ],
       "properties": {
-        "role": { "const": "semantic-auxiliary" },
-        "themes": { "const": ["light", "dark"] },
-        "highContrast": { "const": "monochrome" },
-        "activityBar": { "const": "monochrome" }
+        "role": {
+          "const": "semantic-auxiliary"
+        },
+        "themes": {
+          "const": [
+            "light",
+            "dark"
+          ]
+        },
+        "highContrast": {
+          "const": "monochrome"
+        },
+        "activityBar": {
+          "const": "monochrome"
+        }
       }
     },
     "icons": {
@@ -42,19 +78,46 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "label", "source", "files"],
+        "required": [
+          "id",
+          "label",
+          "source",
+          "files"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-          "label": { "type": "string", "minLength": 1 },
-          "source": { "type": "string", "pattern": "^[a-z][a-z0-9-]*\\.svg\\.tpl$" },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*\\.svg\\.tpl$"
+          },
           "files": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["monochrome", "light", "dark"],
+            "required": [
+              "monochrome",
+              "light",
+              "dark"
+            ],
             "properties": {
-              "monochrome": { "type": "string", "pattern": "\\.svg$" },
-              "light": { "type": "string", "pattern": "^color/light/.+\\.svg$" },
-              "dark": { "type": "string", "pattern": "^color/dark/.+\\.svg$" }
+              "monochrome": {
+                "type": "string",
+                "pattern": "\\.svg$"
+              },
+              "light": {
+                "type": "string",
+                "pattern": "^color/light/.+\\.svg$"
+              },
+              "dark": {
+                "type": "string",
+                "pattern": "^color/dark/.+\\.svg$"
+              }
             }
           }
         }
@@ -65,12 +128,32 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "label", "file", "anchor"],
+        "required": [
+          "id",
+          "label",
+          "file",
+          "anchor"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-          "label": { "type": "string", "minLength": 1 },
-          "file": { "type": "string", "pattern": "^../state/.+\\.svg$" },
-          "anchor": { "enum": ["right-bottom", "right-top", "overlay"] }
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "pattern": "^../state/.+\\.svg$"
+          },
+          "anchor": {
+            "enum": [
+              "right-bottom",
+              "right-top",
+              "overlay"
+            ]
+          }
         }
       }
     }

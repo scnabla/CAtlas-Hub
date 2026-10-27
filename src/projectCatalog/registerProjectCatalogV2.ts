@@ -41,13 +41,13 @@ export function registerProjectCatalogV2(
 
   const updateViewState = (): void => {
     const catalog = service.current;
-    projectView.description = catalog?.name ?? '';
+    projectView.description = '';
     projectView.message = catalog === undefined
       ? service.catalogs.length === 0
-        ? '添加项目即可创建第一个集合，也可以导入已有集合。'
-        : '请选择一个集合，或继续添加、导入项目集合。'
+        ? '添加项目即可创建第一个集合。'
+        : '请选择一个项目集合。'
       : catalog.projects.length === 0 ? '当前集合还没有项目，请使用“添加项目”。' : '';
-    configurationView.description = catalog === undefined ? '个人默认' : catalog.name;
+    configurationView.description = '';
     void vscode.commands.executeCommand('setContext', 'projectManager.hasActiveCatalog', catalog !== undefined);
     void vscode.commands.executeCommand('setContext', 'projectManager.hasCatalogs', service.catalogs.length > 0);
     void vscode.commands.executeCommand('setContext', 'projectManager.hasLegacyCatalogToImport', service.hasLegacyCatalogToImport);
@@ -79,9 +79,6 @@ export function registerProjectCatalogV2(
     }),
     vscode.commands.registerCommand('projectManager.selectCatalog', async () => service.selectCatalog()),
     vscode.commands.registerCommand('projectManager.addProjectToCatalog', async () => service.addProjectToCatalog()),
-    vscode.commands.registerCommand('projectManager.importCatalog', async () => service.importCatalog()),
-    vscode.commands.registerCommand('projectManager.importLegacyCatalog', async () => service.importLegacyCatalog()),
-    vscode.commands.registerCommand('projectManager.exportCatalog', async () => service.exportCatalog()),
     vscode.commands.registerCommand('projectManager.exitCatalog', async () => service.exitCatalog()),
     vscode.commands.registerCommand('projectManager.configureCatalogTabSetting', async (key?: CatalogTabSettingKey) => {
       if (key !== undefined) await service.configureTabSetting(key);
@@ -94,12 +91,6 @@ export function registerProjectCatalogV2(
       if (key !== undefined) await configurationProvider.configurePersonalSetting(key);
     }),
     vscode.commands.registerCommand('projectManager.refreshProjects', async () => service.refresh()),
-    vscode.commands.registerCommand('projectManager.closeCatalog', async () => service.exitCatalog()),
-    vscode.commands.registerCommand('projectManager.openCatalogFile', async () => service.importCatalog()),
-    vscode.commands.registerCommand('projectManager.createCatalogTemplate', async () => service.addProjectToCatalog()),
-    vscode.commands.registerCommand('projectManager.openCatalogSource', async () => {
-      await vscode.window.showInformationMessage('当前集合由插件内部管理；如需查看或迁移数据，请使用“导出集合”。');
-    }),
     vscode.commands.registerCommand('projectManager.openSettings', async () => {
       await vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${context.extension.id}`);
     }),

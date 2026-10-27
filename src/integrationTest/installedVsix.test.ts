@@ -15,6 +15,17 @@ suite('已安装 VSIX', () => {
     const api = await extension.activate();
     assert.equal(api.context.extensionMode, vscode.ExtensionMode.Production);
     assert.ok(api.catalogs.service);
+    const toolbar = extension.packageJSON.contributes.menus['view/title'].filter((item: { when?: string }) => item.when?.includes('view == projectManager.projectsView'));
+    assert.deepEqual(toolbar.map((item: { command: string }) => item.command), [
+      'projectManager.addProjectToCatalog', 'projectManager.selectCatalog', 'projectManager.changeDataLocation',
+      'projectManager.refreshProjects', 'projectManager.exitCatalog',
+    ]);
+    const command = extension.packageJSON.contributes.commands.find((item: { command: string }) => item.command === 'projectManager.changeDataLocation');
+    assert.equal(command.icon, '$(folder-opened)');
+    assert.equal(command.title, 'CAtlas Hub: 修改项目集合数据保存位置');
+    const iconRegistry = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(vscode.Uri.file(vscode.env.appRoot), 'out', 'vs', 'workbench', 'workbench.desktop.main.js'));
+    assert.ok(Buffer.from(iconRegistry).toString('utf8').includes('"folder-opened"'), '保存位置图标必须存在于当前 VS Code 图标注册表');
+
   });
 
   test('INT-159 已安装扩展在空集合状态显示首次使用入口', async () => {

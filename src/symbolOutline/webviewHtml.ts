@@ -22,6 +22,7 @@ export function getSymbolOutlineHtml(
   }));
   const iconSemantics: IconSemantic[] = [
     ...Object.values(symbolKinds).map((metadata) => metadata.semantic),
+    'symbol.preprocessor-else',
     'state.warning',
     'state.edited',
     'state.long-function',
@@ -203,6 +204,30 @@ export function getSymbolOutlineHtml(
       mask-repeat: no-repeat;
       mask-size: contain;
     }
+    .preprocessor-directive {
+      flex: 0 0 auto;
+      color: #9A6700;
+      margin-right: 0;
+      font-family: var(--outline-code-font, monospace);
+      font-size: inherit;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: normal;
+      white-space: pre;
+    }
+    body.vscode-dark .preprocessor-directive,
+    body[data-appearance="sourceInsightBlack"] .preprocessor-directive { color: #FFCA28; }
+    body.vscode-light .preprocessor-directive,
+    body[data-appearance="sourceInsightLight"] .preprocessor-directive { color: #9A6700; }
+    body.vscode-high-contrast .preprocessor-directive,
+    body.vscode-high-contrast-light .preprocessor-directive,
+    body[data-icon-style="native"] .preprocessor-directive,
+    .symbol-row.current .preprocessor-directive { color: inherit; }
+    .symbol-row.type.preprocessor .symbol-name {
+      font-family: var(--outline-code-font, monospace);
+      font-style: normal;
+      font-weight: 400;
+    }
     .symbol-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .symbol-row.type .symbol-name, .symbol-row.long .symbol-name { font-weight: 600; }
     .metrics { flex: 0 0 auto; margin-left: auto; padding-left: 8px; color: var(--outline-muted); font-family: var(--outline-code-font); font-size: 0.88em; }
@@ -293,7 +318,7 @@ export function getSymbolOutlineHtml(
       </div>
       <div id="modeNoticeDetails" class="mode-notice-details">
         <div class="mode-notice-title">仅增强模式已开启</div>
-        <div class="mode-notice-text">VS Code 不允许插件自动隐藏或检测原生大纲是否已隐藏。请在资源管理器标题栏的“…”→“视图”中取消勾选“大纲”。</div>
+        <div class="mode-notice-text">在资源管理器标题栏的“…”→“视图”中取消勾选“大纲”。</div>
         <div class="mode-notice-actions">
           <button id="focusNativeOutline" type="button">定位原生大纲</button>
           <button id="useBothOutlines" class="secondary" type="button">改为同时使用</button>
@@ -442,12 +467,24 @@ export function getSymbolOutlineHtml(
       caret.setAttribute('aria-label', isCollapsed ? '展开' : '折叠');
       if (hasChildren) row.setAttribute('aria-expanded', String(!isCollapsed));
 
-      const icon = createSemanticIcon(iconMetadata.semantic, 'kind-icon', iconMetadata.label);
+      const displayName = symbol.displayName ?? symbol.name;
+      const directiveText = symbol.directive ? symbol.directive + (displayName ? ' ' : '') : '';
+      const displayText = directiveText + displayName;
+      row.append(caret);
+      if (symbol.directive) {
+        row.classList.add('preprocessor');
+        const directive = document.createElement('span');
+        directive.className = 'preprocessor-directive';
+        appendHighlighted(directive, directiveText, currentState.query, displayText, 0);
+        row.append(directive);
+      } else {
+        row.append(createSemanticIcon(symbol.iconSemantic || iconMetadata.semantic, 'kind-icon', iconMetadata.label));
+      }
       const name = document.createElement('span');
       name.className = 'symbol-name';
       name.title = symbol.name;
-      appendHighlighted(name, symbol.name, currentState.query);
-      row.append(caret, icon, name);
+      appendHighlighted(name, displayName, currentState.query, displayText, directiveText.length);
+      row.append(name);
       if (currentState.preferences.showLineMetrics) {
         const metrics = document.createElement('span');
         metrics.className = 'metrics';
@@ -508,20 +545,27 @@ export function getSymbolOutlineHtml(
       previousCurrentId = id;
     }
 
-    function appendHighlighted(target, value, query) {
+    function appendHighlighted(target, value, query, fullValue = value, offset = 0) {
       const needle = String(query || '').trim().toLocaleLowerCase();
       if (!needle) { target.textContent = value; return; }
-      const lower = value.toLocaleLowerCase();
-      let from = 0;
-      while (from < value.length) {
-        const index = lower.indexOf(needle, from);
-        if (index < 0) { target.append(document.createTextNode(value.slice(from))); break; }
-        if (index > from) target.append(document.createTextNode(value.slice(from, index)));
-        const mark = document.createElement('mark');
-        mark.textContent = value.slice(index, index + needle.length);
-        target.append(mark);
-        from = index + needle.length;
+      const lower = fullValue.toLocaleLowerCase();
+      let searchFrom = 0;
+      let written = 0;
+      while (searchFrom < fullValue.length) {
+        const index = lower.indexOf(needle, searchFrom);
+        if (index < 0) break;
+        const start = Math.max(0, index - offset);
+        const end = Math.min(value.length, index + needle.length - offset);
+        if (start < end) {
+          if (start > written) target.append(document.createTextNode(value.slice(written, start)));
+          const mark = document.createElement('mark');
+          mark.textContent = value.slice(start, end);
+          target.append(mark);
+          written = end;
+        }
+        searchFrom = index + needle.length;
       }
+      if (written < value.length) target.append(document.createTextNode(value.slice(written)));
     }
 
     function symbolKindMetadata(kind) {

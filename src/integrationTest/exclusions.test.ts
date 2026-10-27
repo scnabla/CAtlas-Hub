@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { ActiveExclusion, ExclusionServiceV2 } from '../exclusions/exclusionServiceV2';
@@ -72,13 +73,13 @@ suite('屏蔽与取消屏蔽', () => {
   });
 
   test('INT-112 确认取消前不调用写入服务时设置保持不变', () => {
-    const before = vscode.workspace.getConfiguration('files').inspect<Record<string, boolean>>('exclude')?.workspaceValue;
-    const after = vscode.workspace.getConfiguration('files').inspect<Record<string, boolean>>('exclude')?.workspaceValue;
+    const before = getPersonalConfiguration('files').inspect<Record<string, boolean>>('exclude')?.workspaceValue;
+    const after = getPersonalConfiguration('files').inspect<Record<string, boolean>>('exclude')?.workspaceValue;
     assert.deepEqual(after, before);
   });
 
   test('INT-113 屏蔽前确认关闭值能够被真实配置读取', () => {
-    const value = vscode.workspace.getConfiguration('projectManager.exclusions').get<boolean>('confirmBeforeApply', true);
+    const value = getPersonalConfiguration('projectManager.exclusions').get<boolean>('confirmBeforeApply', true);
     assert.equal(typeof value, 'boolean');
   });
 

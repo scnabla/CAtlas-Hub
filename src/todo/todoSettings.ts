@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 /**
  * TODO 的有效配置与解析选项入口；由 extension.ts 绑定当前集合配置来源。
  * 可覆盖项按工作区、集合、全局、默认值取值；个人身份、查看项目已有标记和高亮直接读取个人配置。
@@ -49,7 +50,7 @@ export function bindTodoFeatureConfigurationSource(source: TodoFeatureConfigurat
 }
 
 export function getTodoSettings(catalogSettings = featureSource?.currentProjectTodoSettings): TodoSettings {
-  const configuration = vscode.workspace.getConfiguration('projectManager.todo');
+  const configuration = getPersonalConfiguration('projectManager.todo');
   const enabled = resolveSetting(configuration, 'enabled', catalogSettings?.enabled, true, isBoolean);
   const tags = resolveSetting(configuration, 'tags', catalogSettings?.tags, normalizeTodoTagNames(undefined), isTagList);
   const markdownTasks = resolveSetting(configuration, 'markdownTasks', catalogSettings?.markdownTasks, true, isBoolean);

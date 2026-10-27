@@ -1,3 +1,4 @@
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as vscode from 'vscode';
 import {
   isRegisteredCommand,
@@ -8,7 +9,7 @@ import {
 export type { CapabilityStatus, VscodeCapabilities } from './vscodeCapabilitiesModel';
 
 export function detectVscodeCapabilities(): VscodeCapabilities {
-  const chatSetting = vscode.workspace.getConfiguration('chat').inspect<unknown>('disableAIFeatures');
+  const chatSetting = getPersonalConfiguration('chat').inspect<unknown>('disableAIFeatures');
   return resolveVscodeCapabilities(vscode.version, {
     chatDisableAiFeatures: chatSetting !== undefined && typeof chatSetting.defaultValue === 'boolean',
   });
