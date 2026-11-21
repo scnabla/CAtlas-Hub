@@ -133,7 +133,7 @@ suite('已安装 VSIX', () => {
     const config = vscode.workspace.getConfiguration('projectManager.tabs');
     const original = config.inspect<boolean>('autoOrganize')?.workspaceValue;
     const folder = vscode.workspace.workspaceFolders![0]!.uri;
-    const dir = await fs.mkdtemp(path.join(tmpdir(), 'catlas-group-'));
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(tmpdir(), 'catlas-group-')));
     const externalUri = vscode.Uri.file(path.join(dir, 'external.txt'));
     const secondUri = vscode.Uri.file(path.join(dir, 'second.txt'));
     const groupList = () => vscode.window.tabGroups.all;
@@ -225,7 +225,9 @@ suite('已安装 VSIX', () => {
       if (doc?.isDirty) await doc.save();
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       await config.update('autoOrganize', original, vscode.ConfigurationTarget.Workspace);
-      await fs.rm(dir, { recursive: true, force: true });
+      await vscode.window.tabGroups.close(vscode.window.tabGroups.all.flatMap(group => group.tabs));
+      await api.tabs.waitForIdleForIntegrationTest();
+      await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 
