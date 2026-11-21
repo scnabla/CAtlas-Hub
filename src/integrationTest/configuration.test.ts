@@ -103,7 +103,6 @@ suite('配置侧栏、优先级与实时生效', () => {
       '项目与资源操作',
       '代码 TODO',
       'VS Code 内置 AI 功能',
-      '工作区外文件提醒',
       '函数大纲显示',
     ]);
   });
@@ -133,10 +132,10 @@ suite('配置侧栏、优先级与实时生效', () => {
 
   test('INT-021 配置分组折叠状态可持久化并重建读取', async () => {
     const api = await getApi();
-    await api.catalogs.configurationProvider.setGroupExpanded('external', true);
+    await api.catalogs.configurationProvider.setGroupExpanded('project', true);
     const replacement = new ConfigurationTreeProvider(api.catalogs.service, api.context.globalState);
     try {
-      const node = replacement.getChildren().find((candidate) => candidate.kind === 'group' && candidate.id === 'external');
+      const node = replacement.getChildren().find((candidate) => candidate.kind === 'group' && candidate.id === 'project');
       assert.ok(node);
       assert.equal(replacement.getTreeItem(node).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
     } finally {
@@ -144,7 +143,7 @@ suite('配置侧栏、优先级与实时生效', () => {
     }
   });
 
-  test('INT-022 集合级非项目标签自动移至末尾开关写入内部集合', async () => {
+  test('INT-022 集合级外部文件自动分栏开关写入内部集合', async () => {
     const api = await getApi();
     const catalog = createCatalogForWorkspace('标签配置', { autoOrganize: false });
     await seedCatalogs(api, [catalog], catalog.id);
@@ -239,7 +238,7 @@ suite('配置侧栏、优先级与实时生效', () => {
     await applyPersonalSettingValue('todoProjectMarkers', false);
   });
 
-  test('INT-024 个人非项目标签自动移至末尾默认值写入用户作用域', async () => {
+  test('INT-024 个人外部文件自动分栏默认值写入用户作用域', async () => {
     const result = await applyPersonalSettingValue('tabDefault', true);
     assert.equal(result.globalValue, true);
     assert.equal(getPersonalConfiguration('projectManager.tabs').inspect<boolean>('autoOrganize')?.globalValue, true);
@@ -324,12 +323,7 @@ suite('配置侧栏、优先级与实时生效', () => {
   });
 
   for (const entry of [
-    ['INT-033', 'externalEnabled', false, 'projectManager.externalFiles', 'enabled'],
-    ['INT-034', 'externalColor', false, 'projectManager.externalFiles', 'showColor'],
-    ['INT-035', 'externalBadge', false, 'projectManager.externalFiles', 'showBadge'],
-    ['INT-036', 'externalStatus', false, 'projectManager.externalFiles', 'showStatusBar'],
     ['INT-037', 'outlineScope', 'all', 'projectManager.symbolOutline', 'scope'],
-    ['INT-038', 'outlineHierarchy', 'flat', 'projectManager.symbolOutline', 'hierarchy'],
     ['INT-039', 'outlineSort', 'name', 'projectManager.symbolOutline', 'sort'],
     ['INT-040', 'outlineAppearance', 'sourceInsightBlack', 'projectManager.symbolOutline', 'appearance'],
     ['INT-042', 'showLineMetrics', false, 'projectManager.symbolOutline', 'showLineMetrics'],
@@ -367,7 +361,8 @@ suite('配置侧栏、优先级与实时生效', () => {
         resolve();
       });
     });
-    await setGlobalSetting('projectManager.externalFiles', 'showBadge', true);
+    const configuration = getPersonalConfiguration('projectManager.exclusions');
+    await setGlobalSetting('projectManager.exclusions', 'confirmBeforeApply', !configuration.get('confirmBeforeApply'));
     await changed;
   });
 
@@ -389,11 +384,11 @@ suite('配置侧栏、优先级与实时生效', () => {
 
   test('INT-049 取消配置选择器不会改变值', async () => {
     const api = await getApi();
-    await applyPersonalSettingValue('externalBadge', true);
+    await applyPersonalSettingValue('confirmExclude', true);
     const provider = new ConfigurationTreeProvider(api.catalogs.service, api.context.globalState, interaction(undefined, true));
-    await provider.configurePersonalSetting('externalBadge');
+    await provider.configurePersonalSetting('confirmExclude');
     provider.dispose();
-    assert.equal(getPersonalConfiguration('projectManager.externalFiles').inspect<boolean>('showBadge')?.globalValue, true);
+    assert.equal(getPersonalConfiguration('projectManager.exclusions').inspect<boolean>('confirmBeforeApply')?.globalValue, true);
   });
 
   test('INT-050 配置值在 Provider 重建后保持', async () => {
@@ -525,13 +520,8 @@ async function restorePersonalDefaults(): Promise<void> {
   if (detectVscodeCapabilities().chatDisableAiFeatures.supported) {
     await applyPersonalSettingValue('disableAiFeatures', false);
   }
-  await applyPersonalSettingValue('externalEnabled', true);
-  await applyPersonalSettingValue('externalColor', true);
-  await applyPersonalSettingValue('externalBadge', true);
-  await applyPersonalSettingValue('externalStatus', true);
   await applyPersonalSettingValue('todoProjectMarkers', false);
   await applyPersonalSettingValue('outlineScope', 'functionsAndTypes');
-  await applyPersonalSettingValue('outlineHierarchy', 'tree');
   await applyPersonalSettingValue('outlineSort', 'source');
   await applyPersonalSettingValue('outlineAppearance', 'vscode');
   await applyPersonalSettingValue('showLineMetrics', true);

@@ -10,8 +10,8 @@ export function createCatalogTemplateText(): string {
   "features": {
     // tabs：标签页整理功能。
     "tabs": {
-      // 是否自动将工作区外和非项目标签移到末尾；项目内标签顺序不变。
-      "autoOrganize": false
+      // 首次打开工作区外文件时自动分栏。
+      "autoOrganize": true
     },
 
     // symbolOutline：函数大纲模式。集合内项目使用这里的共享值；工作区显式覆盖优先。

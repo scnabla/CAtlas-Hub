@@ -5,7 +5,6 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { applyPersonalSettingValue } from '../configuration/configurationTreeProvider';
 import { getWorkspaceRelativePath } from '../shared/uri';
-import { isSameOrder, moveNonProjectTabsToTail } from '../tabManagement/tabGrouping';
 import { OpenedFilesViewModeService } from '../tabManagement/openedFilesViewModeService';
 import {
   closeAllEditors,
@@ -38,14 +37,14 @@ suite('标签页自动与手动整理', () => {
     await closeAllEditors();
   });
 
-  test('INT-083 从关闭切换为开启后立即把已打开外部标签移到末尾', async () => {
+  test('INT-083 从关闭切换为开启后立即将已打开外部标签分栏', async () => {
     const api = await getApi();
     await openExternalBeforeProject(api);
     await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
-    await waitUntil(() => baseName(tabUris().at(-1) ?? '') === 'outside.txt', '开启后未立即把外部标签移到末尾');
+    await waitUntil(() => outsideInDedicatedGroup(), '开启后未立即将外部标签分栏');
   });
 
-  test('INT-084 关闭自动移至末尾后新标签保持 VS Code 打开位置', async () => {
+  test('INT-084 关闭自动分栏后新标签保持 VS Code 打开位置', async () => {
     const api = await getApi();
     await applyPersonalSettingValue('tabDefault', false);
     await openText(projectUri(api, 'test-fixtures/workspace-one/README.md'));
@@ -63,32 +62,36 @@ suite('标签页自动与手动整理', () => {
     assert.deepEqual(tabUris(), before);
   });
 
-  test('INT-086 稳定分区不改变项目标签相对顺序', () => {
-    const order = moveNonProjectTabsToTail([
-      { id: 'b1', category: 'project' },
-      { id: 'external', category: 'external' },
-      { id: 'a1', category: 'project' },
-    ]);
-    assert.deepEqual(order, ['b1', 'a1', 'external']);
+  test('INT-086 外部文件分栏后项目标签保持原有顺序', async () => {
+    const api = await getApi();
+    await openExternalBeforeProject(api);
+    const left = vscode.window.tabGroups.activeTabGroup;
+    const before = tabUris(left).filter(uri => baseName(uri) !== 'outside.txt');
+    await api.tabs.organizeCurrentGroup(false);
+    assert.deepEqual(tabUris(vscode.window.tabGroups.all[0]), before);
+    assert.ok(outsideInDedicatedGroup());
   });
 
-  test('INT-087 多个外部标签在末尾保持原顺序', () => {
-    assert.deepEqual(moveNonProjectTabsToTail([
-      { id: 'external1', category: 'external' },
-      { id: 'project', category: 'project' },
-      { id: 'external2', category: 'external' },
-    ]), ['project', 'external1', 'external2']);
+  test('INT-087 两个外部文件共用固定标识的独立栏', async () => {
+    const api = await getApi();
+    const other = projectUri(api, 'LICENSE');
+    await openExternalBeforeProject(api);
+    await openText(other);
+    await api.tabs.organizeCurrentGroup(false);
+    const right = vscode.window.tabGroups.all.find(group => group.tabs.some(tab => tab.label === 'outside.txt'));
+    assert.ok(right && right.tabs[0]?.isPinned);
+    assert.ok(tabUris(right).includes(other.toString()));
   });
 
-  test('INT-088 工作区外文件整理到项目文件之后', async () => {
+  test('INT-088 工作区外文件整理到独立栏', async () => {
     const api = await getApi();
     await openText(projectUri(api, 'test-fixtures/external/outside.txt'));
     await openText(projectUri(api, 'test-fixtures/workspace-one/src/app.ts'));
     await api.tabs.organizeCurrentGroup(false);
-    assert.equal(baseName(tabUris().at(-1) ?? ''), 'outside.txt');
+    assert.ok(outsideInDedicatedGroup());
   });
 
-  test('INT-089 设置页作为特殊标签保持在可移动区段末尾', async () => {
+  test('INT-089 打开设置页保留当前编辑器组', async () => {
     const api = await getApi();
     await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     await openText(projectUri(api, 'test-fixtures/workspace-one/src/app.ts'));
@@ -96,7 +99,7 @@ suite('标签页自动与手动整理', () => {
     await delay(500);
     assert.ok(vscode.window.tabGroups.activeTabGroup.activeTab);
     assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputText, false);
-    assert.equal(vscode.window.tabGroups.activeTabGroup.tabs.at(-1), vscode.window.tabGroups.activeTabGroup.activeTab);
+    assert.equal(vscode.window.tabGroups.all.length, 1);
   });
 
   test('INT-090 特殊标签待处理后切回普通文件可补偿', async () => {
@@ -157,18 +160,18 @@ suite('标签页自动与手动整理', () => {
     await getPersonalConfiguration('projectManager.tabs').update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
     await api.tabs.waitForIdleForIntegrationTest();
     await waitUntil(
-      () => baseName(tabUris().at(-1) ?? '') === 'outside.txt',
+      () => outsideInDedicatedGroup(),
       `没有完成补偿移动；当前顺序：${tabUris().map(baseName).join(' | ')}`,
       3_000,
     );
   });
 
-  test('INT-096 自动关闭时手动移至末尾仍可用', async () => {
+  test('INT-096 自动关闭时手动分栏仍可用', async () => {
     const api = await getApi();
     await applyPersonalSettingValue('tabDefault', false);
     await openExternalBeforeProject(api);
     await api.tabs.organizeCurrentGroup(false);
-    assert.equal(baseName(tabUris().at(-1) ?? ''), 'outside.txt');
+    assert.ok(outsideInDedicatedGroup());
   });
 
   test('INT-097 已符合目标顺序时不改变活动标签', async () => {
@@ -218,10 +221,11 @@ suite('标签页自动与手动整理', () => {
   test('INT-102 重复整理在性能基线内且顺序稳定', async () => {
     const api = await getApi();
     await openInterleaved(api);
+    const before = tabUris();
     const started = Date.now();
     for (let index = 0; index < 10; index += 1) await api.tabs.organizeCurrentGroup(false);
     assert.ok(Date.now() - started < 5_000);
-    assert.equal(isSameOrder(tabUris(), tabUris()), true);
+    assert.deepEqual(tabUris(), before);
   });
 
   test('INT-179 已打开文件目录按文件夹建树且不扫描未打开文件', async () => {
@@ -249,21 +253,26 @@ suite('标签页自动与手动整理', () => {
     assert.equal(vscode.window.tabGroups.all.flatMap((group) => group.tabs).length, beforeCount);
   });
 
-  test('INT-181 多编辑器组显示组根，外部普通文件位于外部节点', async () => {
+  test('INT-181 仅打开外部文件时目录为空，多个组只列各自的工作区文件', async () => {
     const api = await getApi();
-    await openText(projectUri(api, 'test-fixtures/workspace-one/README.md'), { viewColumn: vscode.ViewColumn.One });
-    await openText(projectUri(api, 'test-fixtures/external/outside.txt'), { viewColumn: vscode.ViewColumn.Two });
-    await delay(150);
-    const roots = api.openedFilesTree.provider.getRootsForIntegrationTest();
-    assert.ok(roots.length >= 2);
-    assert.ok(roots.every((node) => node.kind === 'group'));
-    const externalGroup = flattenNodes(roots).find((node) => node.kind === 'externalGroup');
-    assert.ok(externalGroup);
-    const externalGroupIcon = api.openedFilesTree.provider.getTreeItem(externalGroup).iconPath;
-    assert.ok(!(externalGroupIcon instanceof vscode.ThemeIcon));
+    const provider = api.openedFilesTree.provider;
+    const readme = projectUri(api, 'test-fixtures/workspace-one/README.md');
+    const app = projectUri(api, 'test-fixtures/workspace-one/src/app.ts');
+    await openText(projectUri(api, 'test-fixtures/external/outside.txt'));
+    await api.tabs.waitForIdleForIntegrationTest();
+    provider.refresh();
+    assert.deepEqual(provider.getChildren(), []);
+    await openText(readme, { viewColumn: vscode.ViewColumn.One });
+    await openText(app, { viewColumn: vscode.ViewColumn.Two });
+    await api.tabs.waitForIdleForIntegrationTest();
+    provider.refresh();
+    const roots = provider.getChildren();
+    assert.deepEqual(roots.map(node => node.kind), ['group', 'group']);
+    assert.deepEqual(flattenNodes(roots).filter(node => node.kind === 'file').map(node => node.uri),
+      [readme.toString(), app.toString()]);
   });
 
-  test('INT-182 特殊 Diff 不进入目录树，目录仅允许显式命令折叠', async () => {
+  test('INT-182 特殊 Diff 不进入目录树，目录始终展开', async () => {
     const api = await getApi();
     const left = projectUri(api, 'test-fixtures/workspace-one/README.md');
     const right = projectUri(api, 'test-fixtures/workspace-one/normal.txt');
@@ -274,9 +283,7 @@ suite('标签页自动与手动整理', () => {
     assert.equal(flattenLabels(roots).includes('目录树排除 Diff'), false);
     const container = flattenNodes(roots).find((node) => node.kind !== 'file');
     assert.ok(container);
-    api.openedFilesTree.provider.collapse(container);
-    assert.deepEqual(api.openedFilesTree.provider.getChildren(container), []);
-    api.openedFilesTree.provider.expand(container);
+    assert.deepEqual(api.openedFilesTree.provider.getChildren(container), container.children);
     assert.ok(api.openedFilesTree.provider.getChildren(container).length > 0);
   });
 
@@ -384,10 +391,10 @@ suite('标签页自动与手动整理', () => {
     await openText(project);
     await api.tabs.waitForIdleForIntegrationTest();
     assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), project.toString());
-    assert.equal(baseName(tabUris().at(-1) ?? ''), 'outside.txt');
+    assert.ok(outsideInDedicatedGroup());
   });
 
-  test('INT-227 前部打开外部文件时直接移到末尾且不逐项激活项目文件', async () => {
+  test('INT-227 前部打开外部文件时直接分栏且不逐项激活项目文件', async () => {
     const api = await getApi();
     const editorConfiguration = getPersonalConfiguration('workbench.editor');
     const originalOpenPositioning = editorConfiguration.inspect<string>('openPositioning')?.workspaceValue;
@@ -416,7 +423,7 @@ suite('标签页自动与手动整理', () => {
         listener.dispose();
       }
 
-      assert.equal(baseName(tabUris().at(-1) ?? ''), 'outside.txt');
+      assert.ok(outsideInDedicatedGroup());
       assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), external.toString());
       assert.equal(
         activations.some((uri) => uri === second.toString() || uri === third.toString()),
@@ -482,7 +489,7 @@ suite('标签页自动与手动整理', () => {
     assert.ok(extension);
     const contributes = extension.packageJSON.contributes as {
       commands: Array<{ command: string; title: string; icon?: string }>;
-      menus: { 'view/title': Array<{ command: string; when?: string; group?: string }> };
+      menus: { 'editor/title': Array<{ command: string; when?: string; group?: string }> };
     };
     const command = contributes.commands.find((item) => item.command === 'projectManager.hideNativeOpenEditors');
     assert.deepEqual(command, {
@@ -490,8 +497,8 @@ suite('标签页自动与手动整理', () => {
       title: '隐藏原生打开的编辑器',
       category: 'CAtlas Hub',
     });
-    const titleActions = contributes.menus['view/title']
-      .filter((item) => item.when === 'view == projectManager.openedFilesView');
+    const titleActions = contributes.menus['editor/title']
+      .filter((item) => item.when === 'activeWebviewPanelId == projectManager.openedFilesDirectory');
     assert.equal(titleActions.filter((item) => item.command === 'projectManager.hideNativeOpenEditors').length, 1);
     assert.equal(titleActions.some((item) => item.command === 'projectManager.restoreNativeOpenEditors'), false);
   });
@@ -516,6 +523,12 @@ function fixtureTextUris(api: Awaited<ReturnType<typeof getApi>>): vscode.Uri[] 
     projectUri(api, 'test-fixtures/workspace-one/normal.txt'),
     projectUri(api, 'test-fixtures/workspace-one/中文 空格目录/说明 文件.txt'),
   ];
+}
+
+function outsideInDedicatedGroup(): boolean {
+  return vscode.window.tabGroups.all.some(group =>
+    group.tabs.some(tab => tab.label === 'outside.txt') &&
+    group.tabs.some(tab => (tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputCustom) && tab.input.uri.scheme === 'catlas-external-files'));
 }
 
 function baseName(uri: string): string {

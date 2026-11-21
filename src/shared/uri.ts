@@ -61,3 +61,16 @@ export function getWorkspaceRelativePath(
 export function getUriDisplayPath(uri: vscode.Uri): string {
   return uri.scheme === 'file' ? uri.fsPath : uri.toString(true);
 }
+
+export function getUriComparisonKey(uri: vscode.Uri): string {
+  if (uri.scheme === 'file') {
+    const normalizedPath = path.normalize(uri.fsPath);
+    return `file:${process.platform === 'win32' ? normalizedPath.toLowerCase() : normalizedPath}`;
+  }
+
+  return uri.with({
+    scheme: uri.scheme.toLowerCase(),
+    authority: uri.authority.toLowerCase(),
+    fragment: '',
+  }).toString();
+}

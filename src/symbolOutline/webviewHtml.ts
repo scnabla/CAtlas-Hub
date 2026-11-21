@@ -204,6 +204,33 @@ export function getSymbolOutlineHtml(
       mask-repeat: no-repeat;
       mask-size: contain;
     }
+    :root, body[data-appearance="sourceInsightLight"] {
+      --dts-level-0: #546e7a;
+      --dts-level-1: #176d9a;
+      --dts-level-2: #87539a;
+      --dts-level-3: #377657;
+    }
+    body.vscode-dark:not([data-appearance="sourceInsightLight"]), body[data-appearance="sourceInsightBlack"] {
+      --dts-level-0: #b0bec5;
+      --dts-level-1: #76bde5;
+      --dts-level-2: #c99ad9;
+      --dts-level-3: #84c8a5;
+    }
+    .dts-marker[data-level="0"] { color: var(--dts-level-0); }
+    .dts-marker[data-level="1"] { color: var(--dts-level-1); }
+    .dts-marker[data-level="2"] { color: var(--dts-level-2); }
+    .dts-marker[data-level="3"] { color: var(--dts-level-3); }
+    body.vscode-high-contrast .dts-marker, body.vscode-high-contrast-light .dts-marker {
+      color: var(--outline-fg);
+    }
+    .kind-icon.dts-leaf { display: inline-grid; place-items: center; }
+    .dts-leaf::before {
+      content: "";
+      width: calc(6px * var(--outline-scale));
+      height: calc(6px * var(--outline-scale));
+      background-color: currentColor;
+      border-radius: 50%;
+    }
     .preprocessor-directive {
       flex: 0 0 auto;
       color: #9A6700;
@@ -386,6 +413,7 @@ export function getSymbolOutlineHtml(
       elements.modeNotice.hidden = !state.nativeOutlineNotice;
       elements.modeNoticeSummary.hidden = state.nativeOutlineNoticeExpanded;
       elements.modeNoticeDetails.hidden = !state.nativeOutlineNoticeExpanded;
+      elements.scope.hidden = state.languageId === 'dts';
       elements.scope.value = state.preferences.scope;
       elements.sort.value = state.preferences.sort;
       if (document.activeElement !== elements.search) elements.search.value = state.query;
@@ -478,7 +506,22 @@ export function getSymbolOutlineHtml(
         appendHighlighted(directive, directiveText, currentState.query, displayText, 0);
         row.append(directive);
       } else {
-        row.append(createSemanticIcon(symbol.iconSemantic || iconMetadata.semantic, 'kind-icon', iconMetadata.label));
+        const semantic = symbol.iconSemantic || iconMetadata.semantic;
+        if (currentState.languageId === 'dts') {
+          const marker = hasChildren
+            ? createSemanticIcon(semantic, 'kind-icon dts-marker', iconMetadata.label)
+            : document.createElement('span');
+          if (hasChildren) {
+            marker.dataset.iconRendering = 'mask';
+          } else {
+            marker.className = 'kind-icon dts-marker dts-leaf';
+            marker.setAttribute('aria-hidden', 'true');
+          }
+          marker.dataset.level = String(depth % 4);
+          row.append(marker);
+        } else {
+          row.append(createSemanticIcon(semantic, 'kind-icon', iconMetadata.label));
+        }
       }
       const name = document.createElement('span');
       name.className = 'symbol-name';

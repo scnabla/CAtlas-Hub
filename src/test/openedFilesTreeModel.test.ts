@@ -11,7 +11,6 @@ function file(overrides: Partial<OpenedFileDescriptor> & Pick<OpenedFileDescript
     workspaceId: 'file:///workspace',
     workspaceLabel: 'workspace',
     pathSegments: [overrides.label],
-    external: false,
     active: false,
     preview: false,
     ...overrides,
@@ -48,25 +47,8 @@ describe('已打开文件目录树模型', () => {
     assert.ok(roots.every((node) => node.kind === 'workspace'));
   });
 
-  it('工作区外文件统一位于尾部节点', () => {
-    const roots = buildOpenedFilesTree([
-      file({ id: 'inside', label: 'inside.ts' }),
-      {
-        id: 'outside',
-        comparisonKey: 'file:///outside/outside.ts',
-        label: 'outside.ts',
-        uri: 'file:///outside/outside.ts',
-        groupId: '1',
-        groupLabel: '编辑器组 1',
-        pathSegments: ['outside.ts'],
-        external: true,
-        active: false,
-        preview: false,
-      },
-    ]);
-    assert.equal(roots.at(-1)?.kind, 'externalGroup');
-    assert.equal(roots.at(-1)?.label, '工作区外文件');
-    assert.equal(roots.at(-1)?.children[0]?.label, 'outside.ts');
+  it('没有已打开的工作区文件时目录为空', () => {
+    assert.deepEqual(buildOpenedFilesTree([]), []);
   });
 
   it('扁平化结果包含所有目录与文件节点', () => {

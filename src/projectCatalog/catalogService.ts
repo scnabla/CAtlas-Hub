@@ -373,8 +373,8 @@ export class ProjectCatalogService implements vscode.Disposable {
       return;
     }
     const selected = await vscode.window.showQuickPick([
-      { label: '开启自动移至末尾', description: '工作区外和非项目标签稳定置后', value: true },
-      { label: '关闭自动移至末尾', description: '不自动移动标签，仍可使用手动命令', value: false },
+      { label: '开启自动分栏', description: '将工作区外文件放入右侧独立栏', value: true },
+      { label: '关闭自动分栏', description: '不自动移动标签，仍可使用手动命令', value: false },
     ], { title: '标签页设置：自动整理' });
     if (selected === undefined) {
       return;

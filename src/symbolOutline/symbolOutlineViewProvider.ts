@@ -24,7 +24,6 @@ import {
   flattenSymbols,
   getOutlineDisplayName,
   getOutlineSymbolPresentation,
-  OutlineHierarchy,
   OutlineRange,
   OutlineScope,
   OutlineSort,
@@ -32,6 +31,7 @@ import {
   projectSymbols,
 } from './symbolModel';
 import { getSymbolOutlineHtml } from './webviewHtml';
+import { devicetreeNodes } from './devicetreeNodes';
 import { enhanceOutlineSymbols } from './outlineEnhancements';
 import { hasVscodeCommand } from '../platform/vscodeCapabilities';
 import { getIconResourceRoot } from '../visual/webviewIconResources';
@@ -43,9 +43,7 @@ type OutlineStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'excluded' | 'unsu
 
 interface OutlinePreferences {
   mode: OutlineMode;
-  followActiveEditor: boolean;
   scope: OutlineScope;
-  hierarchy: OutlineHierarchy;
   sort: OutlineSort;
   appearance: OutlineAppearance;
   showLineMetrics: boolean;
@@ -75,7 +73,6 @@ export interface OutlineViewState {
   languageId: string;
   external: boolean;
   dirty: boolean;
-  following: boolean;
   query: string;
   currentId: string;
   totalCount: number;
@@ -88,7 +85,6 @@ export interface OutlineViewState {
 
 const VIEW_ID = 'projectManager.symbolOutlineView';
 const LEGACY_VIEW_ID = 'projectManager.enhancedSymbolOutlineView';
-const PINNED_URI_KEY = 'projectManager.symbolOutline.pinnedUri';
 const NATIVE_NOTICE_EXPANDED_KEY = 'projectManager.symbolOutline.nativeNoticeExpanded';
 const LOCATION_HINT_KEY = 'projectManager.symbolOutline.locationHint.v4';
 const MAX_CACHE_SIZE = 10;
@@ -129,13 +125,6 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     const editor = vscode.window.activeTextEditor;
     this.targetUri = editor?.document.uri;
     this.sourceViewColumn = editor?.viewColumn;
-
-    if (!this.preferences.followActiveEditor) {
-      const savedUri = context.workspaceState.get<string>(PINNED_URI_KEY);
-      if (savedUri !== undefined) {
-        this.targetUri = vscode.Uri.parse(savedUri);
-      }
-    }
 
     this.disposables.push(
       this.jumpHighlightDecoration,
@@ -186,7 +175,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
 
   async refreshSymbols(reason: string): Promise<void> {
     const request = ++this.requestSequence;
-    const uri = await this.resolveTargetUri();
+    const uri = this.resolveTargetUri();
     if (request !== this.requestSequence) {
       return;
     }
@@ -202,7 +191,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       document = await this.getDocument(uri);
     } catch (error) {
       this.currentSymbols = [];
-      this.setStatus('error', '无法读取当前文件，可取消固定或重试。');
+      this.setStatus('error', '无法读取当前文件，请重新打开后重试。');
       this.output.appendLine(`[函数大纲] 读取文档失败：${uri.toString()}；${toErrorMessage(error)}`);
       await this.postState();
       return;
@@ -223,10 +212,11 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     }
 
     try {
-      const result = await vscode.commands.executeCommand<readonly (vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
-        'vscode.executeDocumentSymbolProvider',
-        uri,
-      );
+      const result = document.languageId === 'dts'
+        ? devicetreeNodes(document)
+        : await vscode.commands.executeCommand<readonly (vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
+          'vscode.executeDocumentSymbolProvider', uri,
+        );
       if (request !== this.requestSequence || this.targetUri?.toString() !== cacheKey) {
         return;
       }
@@ -386,9 +376,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     const configuration = getPersonalConfiguration('projectManager.symbolOutline');
     return {
       mode: resolveEffectiveOutlineMode(this.catalogService.currentProjectSymbolOutlineSettings).mode,
-      followActiveEditor: true,
       scope: readEnum(configuration.get<string>('scope'), ['functions', 'functionsAndTypes', 'all'], 'functionsAndTypes'),
-      hierarchy: 'tree',
       sort: readEnum(configuration.get<string>('sort'), ['source', 'name', 'typeName'], 'source'),
       appearance: readEnum(configuration.get<string>('appearance'), ['vscode', 'sourceInsightLight', 'sourceInsightBlack'], 'vscode'),
       showLineMetrics: configuration.get<boolean>('showLineMetrics', true),
@@ -401,13 +389,11 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     };
   }
 
-  private async resolveTargetUri(): Promise<vscode.Uri | undefined> {
-    if (this.preferences.followActiveEditor) {
-      const editor = vscode.window.activeTextEditor;
-      if (editor !== undefined) {
-        this.targetUri = editor.document.uri;
-        this.sourceViewColumn = editor.viewColumn;
-      }
+  private resolveTargetUri(): vscode.Uri | undefined {
+    const editor = vscode.window.activeTextEditor;
+    if (editor !== undefined) {
+      this.targetUri = editor.document.uri;
+      this.sourceViewColumn = editor.viewColumn;
     }
     return this.targetUri;
   }
@@ -422,9 +408,6 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       return;
     }
     this.sourceViewColumn = editor.viewColumn;
-    if (!this.preferences.followActiveEditor) {
-      return;
-    }
     this.targetUri = editor.document.uri;
     void this.refreshSymbols('切换活动文件');
   }
@@ -495,7 +478,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       void this.postState();
       return;
     }
-    if (outlineChanged && this.preferences.followActiveEditor) {
+    if (outlineChanged) {
       const editor = vscode.window.activeTextEditor;
       this.targetUri = editor?.document.uri;
       this.sourceViewColumn = editor?.viewColumn;
@@ -541,9 +524,6 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
           await this.jumpToSymbol(message.id);
         }
         return;
-      case 'toggleFollow':
-        await this.refreshSymbols('固定模式已移除');
-        return;
       case 'preference':
         if (typeof message.key === 'string') {
           await this.updatePreference(message.key, message.value);
@@ -577,34 +557,9 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     }
   }
 
-  private async toggleFollow(): Promise<void> {
-    await vscode.window.showInformationMessage('函数大纲现在始终跟随当前活动文本文件，固定模式已移除。');
-    return;
-    /* 旧版固定状态处理代码保留用于兼容历史安装数据，但不再进入。 */
-    const next = !this.preferences.followActiveEditor;
-    if (!next) {
-      const editor = vscode.window.activeTextEditor;
-      if (editor === undefined && this.targetUri === undefined) {
-        await vscode.window.showInformationMessage('请先打开一个源码文件，再固定函数大纲。');
-        return;
-      }
-      this.targetUri = editor?.document.uri ?? this.targetUri;
-      await this.context.workspaceState.update(PINNED_URI_KEY, this.targetUri?.toString());
-    } else {
-      await this.context.workspaceState.update(PINNED_URI_KEY, undefined);
-      const editor = vscode.window.activeTextEditor;
-      this.targetUri = editor?.document.uri;
-      this.sourceViewColumn = editor?.viewColumn;
-    }
-
-    await getPersonalConfiguration('projectManager.symbolOutline')
-      .update('followActiveEditor', next, vscode.ConfigurationTarget.Global);
-  }
-
   private async updatePreference(key: string, value: unknown): Promise<void> {
     const allowed: Record<string, readonly unknown[]> = {
       scope: ['functions', 'functionsAndTypes', 'all'],
-      hierarchy: ['tree', 'flat'],
       sort: ['source', 'name', 'typeName'],
       appearance: ['vscode', 'sourceInsightLight', 'sourceInsightBlack'],
       showLineMetrics: [true, false],
@@ -725,8 +680,8 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       : vscode.workspace.textDocuments.find((item) => item.uri.toString() === this.targetUri?.toString()));
     const preferences = this.preferences;
     const symbols = projectSymbols(this.currentSymbols, {
-      scope: preferences.scope,
-      hierarchy: preferences.hierarchy,
+      scope: actualDocument?.languageId === 'dts' ? 'all' : preferences.scope,
+      hierarchy: 'tree',
       sort: preferences.sort,
       query: this.query,
       locale: vscode.env.language,
@@ -749,7 +704,6 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
       languageId: actualDocument?.languageId ?? '',
       external: uri !== undefined && vscode.workspace.getWorkspaceFolder(uri) === undefined,
       dirty: actualDocument?.isDirty ?? false,
-      following: preferences.followActiveEditor,
       query: this.query,
       currentId: current?.id ?? '',
       totalCount: countSymbols(this.currentSymbols),

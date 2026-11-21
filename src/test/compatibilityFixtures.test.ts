@@ -10,7 +10,7 @@ const FIXTURE_ROOT = path.resolve(__dirname, '../../test-fixtures/compatibility'
 describe('1.0.0 配置兼容夹具', () => {
   it('旧集合文件 v1、v2 和当前 v3 保持稳定解析结果', () => {
     const cases = [
-      ['legacy-catalog-v1.project-butler.json', 'legacy', false, 'both'],
+      ['legacy-catalog-v1.project-butler.json', 'legacy', true, 'both'],
       ['legacy-catalog-v2.project-butler.json', 'legacy', true, 'both'],
       ['catalog-v3.project-butler.json', 'current', false, 'enhanced'],
     ] as const;

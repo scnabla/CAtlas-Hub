@@ -1,503 +1,237 @@
-import { onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
-/**
- * 执行标签移动并维护待处理事件；tabGrouping 计算位置，pendingTabWork 决定何时可以执行。
- * 当前目标是保留工作区内文件相对顺序，将外部文件及特殊编辑器放在后方，不是按目录重排项目文件。
- * VS Code 移动命令操作活动编辑器，所以移动、激活和焦点恢复必须一起考虑；自身事件也需防止重复触发。
- */
 import * as vscode from 'vscode';
+import { onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 import { ProjectFeatureConfigurationSource } from '../configuration/configurationTypes';
-import {
-  GroupableTab,
-  isSameOrder,
-  moveNonProjectTabsToTail,
-  planSingleTabPlacement,
-} from './tabGrouping';
-import {
-  ActiveTabKind,
-  choosePendingGroupAction,
-  PendingGroupSnapshot,
-} from './pendingTabWork';
+import { getUriComparisonKey } from '../shared/uri';
+import { ExternalFileList, externalEditorId, externalTabUri, markerUri } from './externalFileList';
 import { resolveEffectiveTabSettings } from './tabSettings';
 
-interface ManagedTab extends GroupableTab {
-  readonly tab: vscode.Tab;
-  readonly uri: vscode.Uri | undefined;
+const groups = () => vscode.window.tabGroups;
+const groupAt = (column: vscode.ViewColumn) => groups().all.find(group => group.viewColumn === column);
+const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+function uriOf(tab: vscode.Tab | undefined): vscode.Uri | undefined {
+  return tab?.input instanceof vscode.TabInputText ? tab.input.uri : undefined;
+}
+
+function isMarker(tab: vscode.Tab): boolean {
+  return (externalTabUri(tab) ?? uriOf(tab))?.toString() === markerUri.toString();
+}
+
+function externalGroup(): vscode.TabGroup | undefined {
+  return groups().all.find(group => group.tabs.some(isMarker));
+}
+
+function isFile(uri: vscode.Uri): boolean {
+  return uri.scheme === 'file' || uri.scheme === 'vscode-remote';
+}
+
+function isExternal(uri: vscode.Uri): boolean {
+  return isFile(uri) && !vscode.workspace.getWorkspaceFolder(uri);
+}
+
+function findTab(group: vscode.TabGroup | undefined, uri: vscode.Uri): vscode.Tab | undefined {
+  return group?.tabs.find(tab => uriOf(tab)?.toString() === uri.toString());
 }
 
 export class TabManagementService implements vscode.Disposable {
-  private readonly disposables: vscode.Disposable[] = [];
-  private readonly tabIds = new WeakMap<vscode.Tab, string>();
-  private readonly pendingFullGroups = new Set<number>();
-  private readonly pendingTextTabs = new Map<number, Set<string>>();
-  private readonly pendingAuxiliaryTabs = new Map<number, Set<string>>();
-  private readonly scheduledGroups = new Set<number>();
-  private tabIdSequence = 0;
-  private isOrganizing = false;
-  private operationQueue: Promise<void> = Promise.resolve();
-  private settingsSignature: string;
+  private readonly fileList: ExternalFileList;
+  private movingFile: string | undefined;
+  private readonly disposables: vscode.Disposable[];
+  private queue: Promise<void> = Promise.resolve();
+  private scheduled = false;
+  private disposed = false;
+  private ownedGroup: vscode.TabGroup | undefined;
 
-  public constructor(
-    private readonly output: vscode.OutputChannel,
-    private readonly catalogService: ProjectFeatureConfigurationSource,
-  ) {
-    this.settingsSignature = this.getSettingsSignature();
-    if (this.getSettings().autoOrganize) this.requestReconcileForAllGroups();
-
-    this.disposables.push(
-      vscode.window.tabGroups.onDidChangeTabs((event) => this.onTabsChanged(event)),
-      vscode.window.tabGroups.onDidChangeTabGroups((event) => {
-        for (const group of event.closed) this.clearGroupState(group.viewColumn);
-      }),
-      onDidChangePersonalConfiguration((event) => {
-        if (event.affectsConfiguration('projectManager.tabs')) {
-          this.onSettingsChanged();
+  constructor(private readonly output: vscode.OutputChannel, private readonly catalog: ProjectFeatureConfigurationSource, state: vscode.Memento) {
+    this.fileList = new ExternalFileList(state);
+    this.disposables = [
+      this.fileList,
+      vscode.window.registerCustomEditorProvider(externalEditorId, this.fileList, { webviewOptions: { enableFindWidget: true } }),
+      vscode.workspace.registerTextDocumentContentProvider(markerUri.scheme, this.fileList),
+      vscode.languages.registerDocumentLinkProvider({ scheme: markerUri.scheme }, this.fileList),
+      groups().onDidChangeTabs(event => {
+        for (const tab of event.closed) {
+          const uri = uriOf(tab);
+          if (uri && isExternal(uri) && getUriComparisonKey(uri) !== this.movingFile
+              && !groups().all.some(group => findTab(group, uri))) this.fileList.close(uri);
         }
+        for (const tab of event.opened) {
+          const uri = uriOf(tab);
+          if (uri && isExternal(uri)) this.fileList.open(uri);
+        }
+        if (event.opened.length || event.closed.length) this.schedule();
       }),
-      this.catalogService.onDidChange(() => {
-        this.onSettingsChanged();
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.schedule()),
+      onDidChangePersonalConfiguration(event => {
+        if (event.affectsConfiguration('projectManager.tabs') || event.affectsConfiguration('editor.multiCursorModifier')
+            || event.affectsConfiguration('editor.links')) this.schedule();
       }),
-    );
+      catalog.onDidChange(() => this.schedule()),
+    ];
+    for (const group of groups().all) for (const tab of group.tabs) {
+      const uri = uriOf(tab);
+      if (uri && isExternal(uri)) this.fileList.open(uri);
+    }
+    this.schedule();
   }
 
-  public async organizeCurrentGroup(showPreview = true): Promise<void> {
-    await this.operationQueue;
-    await this.organizeGroup(vscode.window.tabGroups.activeTabGroup, showPreview);
+  private get enabled(): boolean {
+    return resolveEffectiveTabSettings(this.catalog.currentProjectTabSettings).values.autoOrganize;
+  }
+
+  private schedule(): void {
+    if (this.scheduled || this.disposed) return;
+    this.scheduled = true;
+    this.queue = this.queue.then(async () => {
+      await pause(60);
+      this.scheduled = false;
+      if (!this.disposed) await this.reconcile(this.enabled);
+    }).catch(error => this.output.appendLine('外部文件分栏失败：' + String(error)));
+  }
+
+  public async organizeCurrentGroup(_showPreview = true): Promise<void> {
+    this.queue = this.queue.then(() => this.reconcile(true));
+    await this.queue;
   }
 
   public async waitForIdleForIntegrationTest(): Promise<void> {
-    await this.operationQueue;
+    let observed;
+    do {
+      observed = this.queue;
+      await observed;
+      await pause(80);
+    } while (observed !== this.queue);
+  }
+
+  private async reconcile(route: boolean): Promise<void> {
+    const folders = vscode.workspace.workspaceFolders;
+    let target = externalGroup();
+    const active = groups().activeTabGroup.activeTab;
+    const legacy = target?.tabs.find(tab => uriOf(tab)?.toString() === markerUri.toString());
+    if (target && legacy && !target.tabs.some(tab => externalTabUri(tab))) {
+      await vscode.commands.executeCommand('vscode.openWith', markerUri, externalEditorId,
+        { viewColumn: target.viewColumn, preserveFocus: !legacy.isActive, preview: false });
+      if (externalTabUri(groups().activeTabGroup.activeTab)) await vscode.commands.executeCommand('workbench.action.pinEditor');
+      if (externalGroup()?.tabs.includes(legacy)) await groups().close(legacy, true);
+    }
+    const entries = groups().all.flatMap(group => group.tabs.map(tab => ({ tab, uri: uriOf(tab) })));
+    // 先处理后台标签，最后恢复用户当前正在看的文件。
+    entries.sort((a, b) => Number(a.tab === active) - Number(b.tab === active));
+    const hasExternal = entries.some(({ uri }) => uri && isExternal(uri));
+    if (route && folders?.length) {
+      if (!target && hasExternal) target = await this.openMarker();
+      if (target) {
+        this.ownedGroup = target;
+        for (const { tab, uri } of entries) {
+          if (!uri || !isFile(uri)) continue;
+          const right = externalGroup();
+          if (!right) break;
+          const outside = isExternal(uri);
+          if (outside === (tab.group.viewColumn === right.viewColumn)) continue;
+          const destination = outside ? right : groups().all.find(group => group.viewColumn !== right.viewColumn);
+          if (destination) {
+            const current = groups().activeTabGroup;
+            const foreground = current.viewColumn === tab.group.viewColumn && uriOf(current.activeTab)?.toString() === uri.toString();
+            this.movingFile = getUriComparisonKey(uri);
+            try {
+              await this.transfer(tab, uri, destination, foreground);
+            } finally {
+              this.movingFile = undefined;
+            }
+          }
+        }
+        // VS Code 会收起移走最后一个标签的组，留出左栏供打开项目文件。
+        if (hasExternal && groups().all.length === 1 && externalGroup()) {
+          const editor = vscode.window.activeTextEditor;
+          await vscode.commands.executeCommand('workbench.action.newGroupLeft');
+          const right = externalGroup();
+          if (editor && right) await vscode.window.showTextDocument(editor.document, { viewColumn: right.viewColumn, preview: false });
+        }
+      }
+    }
+    const right = externalGroup();
+    const files = (right?.tabs ?? []).map(uriOf).filter((uri): uri is vscode.Uri => !!uri && isExternal(uri));
+    const open = groups().all.flatMap(group => group.tabs.map(uriOf))
+      .filter((uri): uri is vscode.Uri => !!uri && isExternal(uri));
+    await this.fileList.refresh(open, files);
+    if ((!files.length && (!hasExternal || !route)) || !folders?.length) {
+      const marker = right?.tabs.find(isMarker);
+      this.ownedGroup = undefined;
+      if (marker && right) {
+        const column = right.viewColumn;
+        const count = groups().all.length;
+        await groups().close(marker, true);
+        const empty = groupAt(column);
+        if (count > 1 && groups().all.length === count && empty?.tabs.length === 0) {
+          await groups().close(empty, true);
+        }
+      }
+    }
+  }
+
+  private async openMarker(): Promise<vscode.TabGroup | undefined> {
+    const sourceColumn = groups().activeTabGroup.viewColumn;
+    const lastColumn = Math.max(...groups().all.map(group => group.viewColumn));
+    const previous = this.ownedGroup;
+    const reuse = previous && groups().all.includes(previous) && previous.tabs.some(tab => {
+      const uri = uriOf(tab);
+      return uri && isExternal(uri);
+    });
+    if (!reuse) {
+      if (sourceColumn !== lastColumn) {
+        await vscode.commands.executeCommand('workbench.action.focusLastEditorGroup');
+      }
+      await vscode.commands.executeCommand('workbench.action.newGroupRight');
+    }
+    const column = reuse ? previous.viewColumn : lastColumn + 1;
+    await vscode.commands.executeCommand('vscode.openWith', markerUri, externalEditorId, { viewColumn: column, preview: false });
+    if (externalTabUri(groups().activeTabGroup.activeTab)) await vscode.commands.executeCommand('workbench.action.pinEditor');
+    // 固定标识需要暂时激活右栏。返回来源栏，由 VS Code 恢复用户最后选中的标签。
+    if (sourceColumn !== column) {
+      const tab = groupAt(sourceColumn)?.activeTab;
+      const uri = uriOf(tab);
+      if (uri) {
+        await vscode.window.showTextDocument(uri, { viewColumn: sourceColumn, preview: tab?.isPreview ?? false });
+      } else {
+        const names = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth'];
+        const name = names[sourceColumn - 1];
+        if (name) await vscode.commands.executeCommand('workbench.action.focus' + name + 'EditorGroup');
+      }
+    }
+    return externalGroup();
+  }
+
+  private async transfer(tab: vscode.Tab, uri: vscode.Uri, destination: vscode.TabGroup, foreground: boolean): Promise<void> {
+    const source = groupAt(tab.group.viewColumn);
+    if (!source || !findTab(source, uri) || source.viewColumn === destination.viewColumn) return;
+    if (foreground || tab.isDirty || tab.isPinned) {
+      const previous = vscode.window.activeTextEditor;
+      if (!foreground) await vscode.window.showTextDocument(uri, { viewColumn: source.viewColumn, preview: tab.isPreview });
+      const focused = groups().activeTabGroup;
+      if (focused.viewColumn !== source.viewColumn || uriOf(focused.activeTab)?.toString() !== uri.toString()) return;
+      await vscode.commands.executeCommand('moveActiveEditor', { by: 'group', to: 'position', value: destination.viewColumn });
+      if (!foreground && previous?.viewColumn && isFile(previous.document.uri) && previous.document.uri.toString() !== uri.toString()) {
+        await vscode.window.showTextDocument(previous.document, { viewColumn: previous.viewColumn, preview: false });
+      }
+      return;
+    }
+    // 后台标签在目的栏打开成功后才关闭来源，不切换用户焦点。
+    const previous = vscode.window.activeTextEditor;
+    const editor = await vscode.window.showTextDocument(uri, {
+      viewColumn: destination.viewColumn, preserveFocus: true, preview: false,
+    });
+    if (editor.viewColumn !== destination.viewColumn || !findTab(groupAt(destination.viewColumn), uri)) return;
+    const original = findTab(groupAt(source.viewColumn), uri);
+    if (original) await groups().close(original, true);
+    if (previous?.viewColumn && previous.document.uri.toString() !== uri.toString()
+        && vscode.window.activeTextEditor?.document.uri.toString() === uri.toString()
+        && findTab(groupAt(previous.viewColumn), previous.document.uri)) {
+      await vscode.window.showTextDocument(previous.document, { viewColumn: previous.viewColumn });
+    }
   }
 
   public dispose(): void {
+    this.disposed = true;
     for (const disposable of this.disposables) disposable.dispose();
   }
-
-  private onTabsChanged(event: vscode.TabChangeEvent): void {
-    for (const tab of event.closed) {
-      this.removePendingTab(tab.group.viewColumn, this.getTabId(tab));
-    }
-    if (this.isOrganizing || !this.getSettings().autoOrganize) return;
-
-    const affected = new Set<number>();
-    for (const tab of event.opened) {
-      const groupKey = tab.group.viewColumn;
-      const tabId = this.getTabId(tab);
-      if (getTextTabUri(tab) === undefined) {
-        this.requestAuxiliaryTab(groupKey, tabId);
-      } else {
-        this.requestTextTab(groupKey, tabId);
-      }
-      affected.add(groupKey);
-    }
-    for (const tab of event.changed) {
-      if (tab.isActive && this.hasPendingWork(tab.group.viewColumn)) {
-        affected.add(tab.group.viewColumn);
-      }
-    }
-    for (const groupKey of affected) this.scheduleGroup(groupKey);
-  }
-
-  private onSettingsChanged(): void {
-    const nextSignature = this.getSettingsSignature();
-    if (nextSignature === this.settingsSignature) {
-      return;
-    }
-    this.settingsSignature = nextSignature;
-    if (!this.getSettings().autoOrganize) {
-      this.clearAllPendingWork();
-      this.output.appendLine('标签配置已更新：自动移至末尾处于关闭状态。');
-      return;
-    }
-    this.output.appendLine('非项目标签自动移至末尾已开启，正在检查全部编辑器组。');
-    this.requestReconcileForAllGroups();
-  }
-
-  private requestReconcileForAllGroups(): void {
-    for (const group of vscode.window.tabGroups.all) {
-      const groupKey = group.viewColumn;
-      this.requestFullReconcile(groupKey);
-      this.scheduleGroup(groupKey);
-    }
-  }
-
-  private requestFullReconcile(groupKey: number): void {
-    this.pendingFullGroups.add(groupKey);
-    this.pendingTextTabs.delete(groupKey);
-    this.pendingAuxiliaryTabs.delete(groupKey);
-  }
-
-  private requestTextTab(groupKey: number, tabId: string): void {
-    if (this.pendingFullGroups.has(groupKey)) return;
-    const pending = this.pendingTextTabs.get(groupKey) ?? new Set<string>();
-    pending.add(tabId);
-    this.pendingTextTabs.set(groupKey, pending);
-  }
-
-  private requestAuxiliaryTab(groupKey: number, tabId: string): void {
-    if (this.pendingFullGroups.has(groupKey)) return;
-    const pending = this.pendingAuxiliaryTabs.get(groupKey) ?? new Set<string>();
-    pending.add(tabId);
-    this.pendingAuxiliaryTabs.set(groupKey, pending);
-  }
-
-  private scheduleGroup(groupKey: number): void {
-    if (this.scheduledGroups.has(groupKey)) {
-      return;
-    }
-    this.scheduledGroups.add(groupKey);
-    this.operationQueue = this.operationQueue
-      .then(async () => {
-        await waitForTabActivationToSettle();
-        this.scheduledGroups.delete(groupKey);
-        await this.drainPendingGroup(groupKey);
-      })
-      .catch((error: unknown) => {
-        this.scheduledGroups.delete(groupKey);
-        this.output.appendLine(`标签归组操作失败：${error instanceof Error ? error.message : String(error)}`);
-      });
-  }
-
-  private async drainPendingGroup(groupKey: number): Promise<void> {
-    if (!this.getSettings().autoOrganize) {
-      this.clearGroupPendingWork(groupKey);
-      return;
-    }
-    const group = this.findCurrentGroup(groupKey);
-    if (group === undefined) {
-      this.clearGroupState(groupKey);
-      return;
-    }
-    const activeTab = group.activeTab;
-    const action = choosePendingGroupAction(
-      this.getPendingSnapshot(groupKey),
-      activeTab === undefined ? undefined : this.getTabId(activeTab),
-      this.getActiveTabKind(activeTab),
-    );
-    switch (action.kind) {
-      case 'none':
-      case 'wait':
-        return;
-      case 'placeAuxiliaryTab':
-        if (activeTab !== undefined && await this.placeAuxiliaryTabAtEnd(activeTab)) {
-          this.removePendingAuxiliaryTab(groupKey, action.tabId);
-        }
-        return;
-      case 'reconcileAll':
-        if (await this.organizeGroup(group, false)) {
-          this.clearGroupPendingWork(groupKey);
-        }
-        return;
-      case 'placeTextTabs': {
-        const result = await this.placePendingTextTabs(group, action.tabIds);
-        for (const tabId of result.processed) this.removePendingTextTab(groupKey, tabId);
-        if (result.needsReconcile) {
-          const latestGroup = this.findCurrentGroup(groupKey);
-          if (latestGroup !== undefined && await this.organizeGroup(latestGroup, false)) {
-            this.clearGroupPendingWork(groupKey);
-          }
-        }
-      }
-    }
-  }
-
-  // 历史缺陷：新增一个外部文件时全组重排，会为移动命令依次激活多个页面。
-  // 优先只移动本次新增标签；只有既有顺序不满足规则时，才请求全组整理。
-  private async placePendingTextTabs(
-    group: vscode.TabGroup,
-    tabIds: readonly string[],
-  ): Promise<{ readonly processed: readonly string[]; readonly needsReconcile: boolean }> {
-    const currentGroup = this.findCurrentGroup(group.viewColumn);
-    const originalActiveTab = currentGroup?.activeTab;
-    if (currentGroup === undefined || originalActiveTab === undefined || getTextTabUri(originalActiveTab) === undefined) {
-      return { processed: [], needsReconcile: false };
-    }
-
-    const originalActiveId = this.getTabId(originalActiveTab);
-    // 保存的是执行移动时的活动页，不是收到“打开”事件前的旧页，避免打开后看起来没有切页。
-    const processed: string[] = [];
-    let needsReconcile = false;
-    this.isOrganizing = true;
-    try {
-      for (const tabId of tabIds) {
-        const latestGroup = this.findCurrentGroup(group.viewColumn);
-        const tabs = latestGroup === undefined ? [] : this.getManagedTabs(latestGroup);
-        const placement = planSingleTabPlacement(tabs, tabId);
-        if (placement.kind === 'reconcile') {
-          needsReconcile = true;
-          break;
-        }
-        if (placement.kind === 'missing' || placement.kind === 'unchanged') {
-          processed.push(tabId);
-          continue;
-        }
-        const target = tabs.find((candidate) => candidate.id === tabId);
-        if (latestGroup === undefined || target === undefined) {
-          processed.push(tabId);
-          continue;
-        }
-        await this.revealTab(target.tab, latestGroup);
-        await vscode.commands.executeCommand('moveActiveEditor', {
-          to: 'position',
-          by: 'tab',
-          value: placement.targetIndex + 1,
-        });
-        processed.push(tabId);
-      }
-    } catch (error) {
-      this.output.appendLine(`新标签快速放置失败：${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      try {
-        const latestGroup = this.findCurrentGroup(group.viewColumn);
-        const original = latestGroup?.tabs.find((tab) => this.getTabId(tab) === originalActiveId);
-        if (latestGroup !== undefined
-          && original !== undefined
-          && latestGroup.activeTab !== original) {
-          await this.revealTab(original, latestGroup);
-        }
-      } catch (error) {
-        this.output.appendLine(`恢复原活动标签失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-      this.isOrganizing = false;
-    }
-    return { processed, needsReconcile };
-  }
-
-  private async placeAuxiliaryTabAtEnd(tab: vscode.Tab): Promise<boolean> {
-    const group = this.findCurrentGroup(tab.group.viewColumn);
-    if (group === undefined || group.activeTab !== tab) return false;
-    const currentIndex = group.tabs.indexOf(tab);
-    if (currentIndex < 0 || currentIndex === group.tabs.length - 1) return true;
-    this.isOrganizing = true;
-    try {
-      await vscode.commands.executeCommand('moveActiveEditor', {
-        to: 'position',
-        by: 'tab',
-        value: group.tabs.length,
-      });
-      this.output.appendLine(`已将新打开的非项目标签“${tab.label}”移动到当前组末尾。`);
-      return true;
-    } catch (error) {
-      this.output.appendLine(`非项目特殊标签移动失败：${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    } finally {
-      this.isOrganizing = false;
-    }
-  }
-
-  private getPendingSnapshot(groupKey: number): PendingGroupSnapshot {
-    return {
-      fullReconcile: this.pendingFullGroups.has(groupKey),
-      textTabIds: [...(this.pendingTextTabs.get(groupKey) ?? [])],
-      auxiliaryTabIds: [...(this.pendingAuxiliaryTabs.get(groupKey) ?? [])],
-    };
-  }
-
-  private getActiveTabKind(tab: vscode.Tab | undefined): ActiveTabKind {
-    if (tab === undefined) return 'none';
-    return getTextTabUri(tab) === undefined ? 'auxiliary' : 'movableText';
-  }
-
-  private hasPendingWork(groupKey: number): boolean {
-    return this.pendingFullGroups.has(groupKey)
-      || (this.pendingTextTabs.get(groupKey)?.size ?? 0) > 0
-      || (this.pendingAuxiliaryTabs.get(groupKey)?.size ?? 0) > 0;
-  }
-
-  private removePendingTab(groupKey: number, tabId: string): void {
-    this.removePendingTextTab(groupKey, tabId);
-    this.removePendingAuxiliaryTab(groupKey, tabId);
-  }
-
-  private removePendingTextTab(groupKey: number, tabId: string): void {
-    const pending = this.pendingTextTabs.get(groupKey);
-    pending?.delete(tabId);
-    if (pending?.size === 0) this.pendingTextTabs.delete(groupKey);
-  }
-
-  private removePendingAuxiliaryTab(groupKey: number, tabId: string): void {
-    const pending = this.pendingAuxiliaryTabs.get(groupKey);
-    pending?.delete(tabId);
-    if (pending?.size === 0) this.pendingAuxiliaryTabs.delete(groupKey);
-  }
-
-  private clearGroupPendingWork(groupKey: number): void {
-    this.pendingFullGroups.delete(groupKey);
-    this.pendingTextTabs.delete(groupKey);
-    this.pendingAuxiliaryTabs.delete(groupKey);
-  }
-
-  private clearGroupState(groupKey: number): void {
-    this.clearGroupPendingWork(groupKey);
-    this.scheduledGroups.delete(groupKey);
-  }
-
-  private clearAllPendingWork(): void {
-    this.pendingFullGroups.clear();
-    this.pendingTextTabs.clear();
-    this.pendingAuxiliaryTabs.clear();
-  }
-
-  private async organizeGroup(group: vscode.TabGroup, showPreview: boolean): Promise<boolean> {
-    if (this.isOrganizing) {
-      return false;
-    }
-    const originalActiveTab = group.activeTab;
-    if (originalActiveTab !== undefined && getTextTabUri(originalActiveTab) === undefined) {
-      const currentIndex = group.tabs.indexOf(originalActiveTab);
-      if (currentIndex >= 0 && currentIndex < group.tabs.length - 1) {
-        this.isOrganizing = true;
-        try {
-          await vscode.commands.executeCommand('moveActiveEditor', {
-            to: 'position',
-            by: 'tab',
-            value: group.tabs.length,
-          });
-          this.output.appendLine(`已将新打开的非项目标签“${originalActiveTab.label}”移动到当前组末尾。`);
-        } catch (error) {
-          this.output.appendLine(`非项目特殊标签移动失败：${error instanceof Error ? error.message : String(error)}`);
-          return false;
-        } finally {
-          this.isOrganizing = false;
-        }
-      }
-      return true;
-    }
-
-    const tabs = this.getManagedTabs(group);
-    const currentOrder = tabs.map((tab) => tab.id);
-    const targetOrder = moveNonProjectTabsToTail(tabs);
-    if (isSameOrder(currentOrder, targetOrder)) {
-      if (showPreview) {
-        await vscode.window.showInformationMessage('当前标签组的非项目标签已经位于末尾。');
-      } else {
-        this.output.appendLine(`编辑器组 ${group.viewColumn} 的非项目标签已经位于末尾，无需移动。`);
-      }
-      return true;
-    }
-
-    if (showPreview) {
-      const confirmed = await vscode.window.showInformationMessage(
-        '确认将当前组的工作区外及非项目标签移到末尾吗？',
-        {
-          modal: true,
-          detail: `${formatOrderPreview('当前', tabs, currentOrder)}\n\n${formatOrderPreview('目标', tabs, targetOrder)}\n\n项目内文件之间的顺序不会改变。`,
-        },
-        '移到末尾',
-      );
-      if (confirmed !== '移到末尾') {
-        return false;
-      }
-    }
-
-    this.isOrganizing = true;
-    try {
-      for (let targetIndex = 0; targetIndex < targetOrder.length; targetIndex += 1) {
-        const desiredId = targetOrder[targetIndex];
-        const currentGroup = this.findCurrentGroup(group.viewColumn);
-        const currentTabs = currentGroup === undefined ? [] : this.getManagedTabs(currentGroup);
-        const currentIndex = currentTabs.findIndex((tab) => tab.id === desiredId);
-        const desiredTab = currentTabs[currentIndex];
-        if (currentIndex < 0 || currentIndex === targetIndex || desiredTab === undefined || desiredTab.uri === undefined) {
-          continue;
-        }
-        await this.revealTab(desiredTab.tab, currentGroup ?? group);
-        await vscode.commands.executeCommand('moveActiveEditor', {
-          to: 'position',
-          by: 'tab',
-          value: targetIndex + 1,
-        });
-      }
-      const finalGroup = this.findCurrentGroup(group.viewColumn);
-      if (finalGroup !== undefined && originalActiveTab !== undefined && getTextTabUri(originalActiveTab) !== undefined) {
-        await this.revealTab(originalActiveTab, finalGroup);
-      }
-      this.output.appendLine(`已将编辑器组 ${group.viewColumn} 的非项目标签稳定移动到末尾。`);
-      return true;
-    } catch (error) {
-      this.output.appendLine(`非项目标签移动失败：${error instanceof Error ? error.message : String(error)}`);
-      if (showPreview) {
-        await vscode.window.showErrorMessage('非项目标签移动未完成，详情请查看“CAtlas Hub”输出。');
-      }
-      return false;
-    } finally {
-      this.isOrganizing = false;
-    }
-  }
-
-  private getManagedTabs(group: vscode.TabGroup): ManagedTab[] {
-    return group.tabs.map((tab): ManagedTab => {
-      const uri = getTextTabUri(tab);
-      const category = getTabCategory(uri);
-      return {
-        id: this.getTabId(tab),
-        category,
-        tab,
-        uri,
-      };
-    });
-  }
-
-  private getTabId(tab: vscode.Tab): string {
-    const uri = getTextTabUri(tab);
-    if (uri !== undefined) {
-      return `group-${tab.group.viewColumn}:text:${uri.toString()}`;
-    }
-    const existing = this.tabIds.get(tab);
-    if (existing !== undefined) {
-      return existing;
-    }
-    this.tabIdSequence += 1;
-    const id = `special-${this.tabIdSequence}`;
-    this.tabIds.set(tab, id);
-    return id;
-  }
-
-  private findCurrentGroup(viewColumn: vscode.ViewColumn): vscode.TabGroup | undefined {
-    return vscode.window.tabGroups.all.find((group) => group.viewColumn === viewColumn);
-  }
-
-  private async revealTab(tab: vscode.Tab, group: vscode.TabGroup): Promise<void> {
-    const uri = getTextTabUri(tab);
-    if (uri === undefined) {
-      return;
-    }
-    await vscode.window.showTextDocument(uri, {
-      viewColumn: group.viewColumn,
-      preserveFocus: false,
-      preview: tab.isPreview,
-    });
-  }
-
-  private getSettings() {
-    return resolveEffectiveTabSettings(this.catalogService.currentProjectTabSettings).values;
-  }
-
-  private getSettingsSignature(): string {
-    const settings = this.getSettings();
-    return String(settings.autoOrganize);
-  }
-}
-
-async function waitForTabActivationToSettle(): Promise<void> {
-  await new Promise<void>((resolve) => setTimeout(resolve, 50));
-}
-
-function getTextTabUri(tab: vscode.Tab): vscode.Uri | undefined {
-  if (!(tab.input instanceof vscode.TabInputText)
-    || (tab.input.uri.scheme !== 'file' && tab.input.uri.scheme !== 'vscode-remote')) {
-    return undefined;
-  }
-  return tab.input.uri;
-}
-
-function getTabCategory(uri: vscode.Uri | undefined): GroupableTab['category'] {
-  if (uri === undefined) {
-    return 'external';
-  }
-  return vscode.workspace.getWorkspaceFolder(uri) === undefined ? 'external' : 'project';
-}
-
-function formatOrderPreview(title: string, tabs: readonly ManagedTab[], order: readonly string[]): string {
-  const labels = new Map(tabs.map((tab) => [tab.id, tab.tab.label]));
-  return `${title}：${order.map((id) => labels.get(id) ?? id).join(' | ')}`;
 }

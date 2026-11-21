@@ -16,7 +16,7 @@ const {getOutlineSymbolPresentation} = require(path.join(root,'dist/symbolOutlin
 const {getSymbolIconMetadata} = require(path.join(root,'dist/visual/iconSemantics.js'));
 const examples=[['#if MODE == 1','PreprocessorRegion'],['#ifdef FEATURE','PreprocessorRegion'],['#ifndef FEATURE','PreprocessorRegion'],['#elif MODE == 2','PreprocessorBranch'],['#else','PreprocessorBranch'],['calculate','Function'],['value','Variable'],['MAX_COUNT','MacroDefinition'],['42','Number']];
 const symbols=examples.map(([name,kind],line)=>({id:'row-'+line,editKey:'row-'+line,name,kind,detail:'',containerName:'',parentPath:'',range:{start:{line,character:0},end:{line,character:25}},selectionRange:{start:{line,character:0},end:{line,character:25}},span:1,isLong:false,isEdited:false,isContext:false,children:[],iconSemantic:getSymbolIconMetadata(kind,name).semantic,...getOutlineSymbolPresentation(kind,name)}));
-const state={status:'ready',message:'',fileName:'',filePath:'',languageId:'c',external:false,dirty:false,following:true,query:'',currentId:'',totalCount:9,visibleCount:9,symbols,preferences:{mode:'both',followActiveEditor:true,scope:'all',hierarchy:'tree',sort:'source',appearance:'vscode',showLineMetrics:false,highlightLongFunctions:false,highlightEditedSymbols:false,scale:100,iconStyle:'unified'},nativeOutlineNotice:false,nativeOutlineNoticeExpanded:false};
+const state={status:'ready',message:'',fileName:'',filePath:'',languageId:'c',external:false,dirty:false,query:'',currentId:'',totalCount:9,visibleCount:9,symbols,preferences:{mode:'both',scope:'all',sort:'source',appearance:'vscode',showLineMetrics:false,highlightLongFunctions:false,highlightEditedSymbols:false,scale:100,iconStyle:'unified'},nativeOutlineNotice:false,nativeOutlineNoticeExpanded:false};
 let html=getSymbolOutlineHtml({cspSource:'data:',asWebviewUri:x=>({toString:()=> 'data:image/svg+xml;base64,'+fs.readFileSync(x.fsPath).toString('base64')})},uri(root));
 const nonce=html.match(/<style nonce="([^"]+)"/)[1];
 const css=`:root{--vscode-sideBar-background:#1f1f1f;--vscode-sideBar-foreground:#ddd;--vscode-font-family:system-ui;--vscode-editor-font-family:${process.platform === 'win32' ? 'Consolas,"Courier New"' : '"DejaVu Sans Mono"'},monospace;--vscode-list-activeSelectionBackground:#264f78;--vscode-list-activeSelectionForeground:white;--vscode-focusBorder:#007acc;--vscode-descriptionForeground:#aaa;--vscode-list-hoverBackground:#333}.toolbar,.count{display:none}body{padding:24px}.shell{height:auto}.list-wrap{overflow:visible}h1{font:20px system-ui;margin:0 0 20px}.symbol-row{min-height:34px}#verification{display:none}`;
@@ -54,6 +54,45 @@ for(const theme of ['vscode-light','vscode-dark','vscode-high-contrast','vscode-
   state.query='';
   checks.push({theme,scale,rows:5,highlightQueries:6,passed:true});
  }
+}
+// 两份不同内容的设备树以不同顺序渲染，颜色取决于深度，而非文件或节点名称。
+const dtsState = {...state, languageId:'dts', preferences:{...state.preferences}};
+function node(id, children=[]) {
+  return {...state.symbols[0], id, name:id, displayName:id, kind:'Namespace',
+    iconSemantic:'symbol.namespace', directive:'', children};
+}
+for (const theme of ['vscode-light','vscode-dark','vscode-high-contrast','vscode-high-contrast-light']) {
+  document.body.className=theme;
+  for (const scale of [90,100,150]) {
+    dtsState.preferences.scale=scale;
+    let firstColors;
+    for (const file of ['a.dts','b.overlay']) {
+      dtsState.fileName=file;
+      const branch=node(file+'-bus',[node(file+'-sensor')]);
+      const sibling=node(file+'-gpio');
+      dtsState.symbols=[node(file,file==='a.dts'?[branch,sibling]:[sibling,branch])];
+      window.dispatchEvent(new MessageEvent('message',{data:{type:'state',state:dtsState}}));
+      const rows=[...document.querySelectorAll('.symbol-row')];
+      const getRow=id=>rows.find(row=>row.dataset.id===id);
+      const color=row=>getComputedStyle(row.querySelector('.dts-marker')).color;
+      const root=getRow(file), bus=getRow(branch.id), leaf=getRow(sibling.id), sensor=getRow(file+'-sensor');
+      if(color(bus)!==color(leaf))throw Error('同层父节点与末级节点颜色不同');
+      const colors=[color(root),color(bus),color(sensor)];
+      if(firstColors && colors.join()!==firstColors.join())throw Error('切换文件后层级颜色变化');
+      firstColors=colors;
+      if(!theme.includes('contrast') && new Set(colors).size!==3)throw Error('层级颜色未生效');
+      const dot=leaf.querySelector('.dts-leaf');
+      if(Math.abs(parseFloat(getComputedStyle(dot,'::before').width)-6*scale/100)>0.02)throw Error('末级圆点尺寸不符');
+      if(bus.querySelector('.dts-leaf') || !bus.querySelector('[data-icon-semantic="symbol.namespace"]'))throw Error('父节点图标变化');
+      const arrow=bus.querySelector('.caret');
+      arrow.click();
+      if(arrow.textContent!=='▸' || bus.getAttribute('aria-expanded')!=='false')throw Error('折叠箭头异常');
+      arrow.click();
+      if(arrow.textContent!=='▾' || bus.getAttribute('aria-expanded')!=='true')throw Error('展开箭头异常');
+      leaf.click();
+      if(window.testMessages.at(-1).id!==sibling.id)throw Error('末级节点跳转异常');
+    }
+  }
 }
 document.body.className='vscode-dark';state.preferences.scale=100;state.query='';window.dispatchEvent(new MessageEvent('message',{data:{type:'state',state}}));
 const result=document.createElement('pre');result.id='verification';result.textContent=JSON.stringify({passed:true,checks});document.body.append(result);

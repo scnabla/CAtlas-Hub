@@ -242,7 +242,7 @@ const defaultInteraction: OpenedFilesViewInteraction = {
   async confirmHideNative(modal) {
     modal = true;
     const result = await vscode.window.showWarningMessage(
-      '“已打开文件目录”已启用。是否隐藏原生“打开的编辑器”，避免两个视图重复？',
+      '“已打开文件”已启用。是否隐藏原生“打开的编辑器”，避免两个视图重复？',
       { modal, detail: '插件会先尝试公开设置；若当前 VS Code 已禁止设置为 0，将给出手动隐藏方法，不会留下错误配置。' },
       '隐藏原生视图',
     );

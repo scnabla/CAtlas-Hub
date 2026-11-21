@@ -473,16 +473,16 @@ export class ProjectCatalogServiceV2 implements vscode.Disposable, ProjectFeatur
     const target = this.projectContext.kind === 'member' ? this.getStoredActiveCatalog() : undefined;
     if (target === undefined) {
       await this.configurePersonalValue('projectManager.tabs', 'autoOrganize', [
-        { label: '开启自动移至末尾', value: true },
-        { label: '关闭自动移至末尾', value: false },
-      ], '个人默认：非项目标签自动移至末尾');
+        { label: '开启自动分栏', value: true },
+        { label: '关闭自动分栏', value: false },
+      ], '个人默认：自动将外部文件分栏');
       return;
     }
     const selected = await vscode.window.showQuickPick([
       { label: '跟随个人默认', description: target.features.tabs.autoOrganize === undefined ? '当前值' : '', value: undefined },
-      { label: '开启自动移至末尾', description: target.features.tabs.autoOrganize ? '当前值' : '', value: true },
-      { label: '关闭自动移至末尾', description: target.features.tabs.autoOrganize === false ? '当前值' : '', value: false },
-    ], { title: `配置“${target.name}”：非项目标签自动移至末尾` });
+      { label: '开启自动分栏', description: target.features.tabs.autoOrganize ? '当前值' : '', value: true },
+      { label: '关闭自动分栏', description: target.features.tabs.autoOrganize === false ? '当前值' : '', value: false },
+    ], { title: `配置“${target.name}”：自动将外部文件分栏` });
     if (selected === undefined || selected.value === target.features.tabs.autoOrganize) {
       return;
     }

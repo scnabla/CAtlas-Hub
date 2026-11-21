@@ -7,7 +7,7 @@ export function registerTabManagement(
   output: vscode.OutputChannel,
   catalogService: ProjectFeatureConfigurationSource,
 ): TabManagementService {
-  const service = new TabManagementService(output, catalogService);
+  const service = new TabManagementService(output, catalogService, context.workspaceState);
   context.subscriptions.push(
     service,
     vscode.commands.registerCommand('projectManager.organizeCurrentTabGroup', async () => service.organizeCurrentGroup()),

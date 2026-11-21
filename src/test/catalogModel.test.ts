@@ -78,7 +78,7 @@ describe('项目集合模型', () => {
     assert.equal(catalog.issues.length, 0);
     assert.equal(catalog.projects.length, 0);
     assert.equal(catalog.schemaVersion, 3);
-    assert.equal(catalog.features.tabs.autoOrganize, false);
+    assert.equal(catalog.features.tabs.autoOrganize, true);
     assert.equal(catalog.features.symbolOutline.mode, 'both');
   });
 
@@ -96,7 +96,7 @@ describe('项目集合模型', () => {
   it('兼容读取 v1 并提供标签默认值', () => {
     const catalog = parseProjectCatalogText('{ "schemaVersion": 1, "projects": [] }');
     assert.equal(catalog.compatibility, 'legacy');
-    assert.deepEqual(catalog.features.tabs, { autoOrganize: false });
+    assert.deepEqual(catalog.features.tabs, { autoOrganize: true });
     assert.deepEqual(catalog.features.symbolOutline, { mode: 'both' });
     assert.equal(catalog.issues.length, 0);
   });
@@ -124,7 +124,7 @@ describe('项目集合模型', () => {
       projects: [],
     }));
     assert.equal(catalog.compatibility, 'current');
-    assert.equal(catalog.features.tabs.autoOrganize, false);
+    assert.equal(catalog.features.tabs.autoOrganize, true);
     assert.equal(catalog.issues.some((issue) => issue.message.includes('autoOrganize')), true);
   });
 

@@ -176,7 +176,7 @@ export class ProjectCatalogTreeProvider implements vscode.TreeDataProvider<Proje
       const item = new vscode.TreeItem('标签页设置', vscode.TreeItemCollapsibleState.Expanded);
       const effective = resolveEffectiveTabSettings(this.service.currentProjectTabSettings);
       item.iconPath = new vscode.ThemeIcon('layout', new vscode.ThemeColor('charts.blue'));
-      item.description = `非项目标签移至末尾${effective.values.autoOrganize ? '已开启' : '已关闭'} · ${effective.sources.autoOrganize}`;
+      item.description = `外部文件分栏${effective.values.autoOrganize ? '已开启' : '已关闭'} · ${effective.sources.autoOrganize}`;
       item.contextValue = 'projectCatalog.tabSettings';
       return item;
     }
@@ -212,16 +212,16 @@ export class ProjectCatalogTreeProvider implements vscode.TreeDataProvider<Proje
     }
     if (node.kind === 'tabAction') {
       const item = new vscode.TreeItem(
-        '手动将非项目标签移到末尾',
+        '手动将外部文件移至独立栏',
         vscode.TreeItemCollapsibleState.None,
       );
       item.iconPath = new vscode.ThemeIcon('list-tree', new vscode.ThemeColor('charts.blue'));
       item.contextValue = `projectCatalog.tabAction.${node.action}`;
       item.command = {
         command: 'projectManager.organizeCurrentTabGroup',
-        title: '手动将非项目标签移到末尾',
+        title: '手动将外部文件移至独立栏',
       };
-      item.tooltip = '稳定地把工作区外文件及非项目标签移到当前编辑器组末尾，不改变项目内文件之间的顺序。';
+      item.tooltip = '将已打开的工作区外文件集中到右侧独立栏。';
       return item;
     }
 
@@ -284,7 +284,7 @@ function getCompatibilityLabel(catalog: ActiveProjectCatalog): string {
 
 function getSettingLabel(key: CatalogTabSettingKey): string {
   switch (key) {
-    case 'autoOrganize': return '非项目标签自动移至末尾';
+    case 'autoOrganize': return '自动将外部文件分栏';
   }
 }
 
@@ -307,7 +307,7 @@ function getSettingTooltip(
   const shared = catalog?.catalog.features.tabs;
   switch (key) {
     case 'autoOrganize':
-      return `开启时会将工作区外文件、设置页、扩展说明等非项目标签稳定移到末尾；项目内标签保持用户顺序。\n当前生效：${effective.values.autoOrganize ? '开启' : '关闭'}（${effective.sources.autoOrganize}）\n集合默认：${shared?.autoOrganize === true ? '开启' : '关闭'}\n当前归属：${formatContextKind(contextKind)}`;
+      return `开启后，工作区外的文件会在独立栏中显示。\n当前生效：${effective.values.autoOrganize ? '开启' : '关闭'}（${effective.sources.autoOrganize}）\n集合默认：${shared?.autoOrganize === true ? '开启' : '关闭'}\n当前归属：${formatContextKind(contextKind)}`;
   }
 }
 

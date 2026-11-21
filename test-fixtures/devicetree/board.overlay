@@ -1,0 +1,22 @@
+#include <dt-bindings/gpio/gpio.h>
+
+&i2c1 {
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    sensor0: sensor@48 {
+        compatible = "vendor,tmp102";
+        reg = <0x48>;
+        alert-gpios = <
+            &gpio2 7 GPIO_ACTIVE_LOW
+        >;
+        vendor,data = [0a FF];
+        wakeup-source;
+        /* &ignored
+           #include "ignored.h" */
+    };
+};
+
+&{/soc/i2c@4000} {
+    status = "okay";
+};

@@ -115,7 +115,7 @@ npm run benchmark:todo
 
 默认用户目录中的 `personal-data.dat.location` 记录当前数据文件位置。个人数据文件保存偏好、集合和关联，工作区状态保存活动状态与恢复记录。VS Code 内置 AI、原生视图与快捷键设置由 VS Code 自身保存。
 
-集合功能包括 `features.tabs.autoOrganize` 和 `features.symbolOutline.mode`，默认值分别为 `false` 和 `both`。工作区显式设置优先于集合覆盖和个人默认值；大纲模式快捷选择与配置视图共用配置写入服务。
+集合功能包括 `features.tabs.autoOrganize` 和 `features.symbolOutline.mode`，默认值分别为 `true` 和 `both`。工作区显式设置优先于集合覆盖和个人默认值；大纲模式快捷选择与配置视图共用配置写入服务。
 
 标签整理等待活动标签切换完成后再调用 VS Code 移动命令。原生视图按当前版本注册的命令隐藏或恢复，缺少命令时提示手动操作；恢复失败时保留恢复记录。
 
@@ -123,6 +123,6 @@ npm run benchmark:todo
 
 ## 用户文档与发布检查
 
-`README.md` 用于扩展详情页，包含功能介绍、安装使用、配置操作及必要限制。开发环境、实现说明和测试命令维护在 `DEVELOPMENT.md`；内部测试清单与验收记录维护在内部仓库的 `doc/`。开发文档与内部记录由 `.vscodeignore` 排除，不随 VSIX 分发。
+`README.md` 用于扩展详情页，包含功能介绍、安装使用、配置操作及必要限制。开发环境、实现说明和测试命令维护在 `DEVELOPMENT.md`；内部测试清单与验收记录集中保存在独立私有资料库，按项目分目录管理。开发文档由 `.vscodeignore` 排除，不随 VSIX 分发。
 
 修改 README 后逐段检查其是否适合扩展使用者阅读，核对命令名称、功能限制和下载链接。已发布安装包中的 README 不会随仓库文件修改而更新；更新扩展详情需按发布流程生成并发布新版本。

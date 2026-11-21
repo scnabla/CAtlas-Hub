@@ -1,5 +1,6 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
+import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import { applyPersonalSettingValue } from '../configuration/configurationTreeProvider';
 import { hasVscodeCommand } from '../platform/vscodeCapabilities';
 import { flattenSymbols } from '../symbolOutline/symbolModel';
@@ -62,36 +63,24 @@ suite('增强函数大纲', () => {
   });
 
   test('INT-134 树状层级保留类与方法父子关系', async () => {
-    await applyPersonalSettingValue('outlineHierarchy', 'tree');
     const state = await openSampleAndRefresh();
     const calculator = state.symbols.find((symbol) => symbol.name === 'Calculator');
-    assert.ok(calculator?.children.some((symbol) => symbol.name === 'add'));
-  });
-
-  test('INT-135 旧平铺配置兼容读取但运行固定树状', async () => {
-    await applyPersonalSettingValue('outlineHierarchy', 'flat');
-    const state = await openSampleAndRefresh();
-    const calculator = state.symbols.find((symbol) => symbol.name === 'Calculator');
-    assert.equal(state.preferences.hierarchy, 'tree');
     assert.ok(calculator?.children.some((symbol) => symbol.name === 'add'));
   });
 
   test('INT-136 源码排序按起始行递增', async () => {
-    await applyPersonalSettingValue('outlineHierarchy', 'flat');
     await applyPersonalSettingValue('outlineSort', 'source');
     const lines = (await openSampleAndRefresh()).symbols.map((symbol) => symbol.range.start.line);
     assert.deepEqual(lines, [...lines].sort((left, right) => left - right));
   });
 
   test('INT-137 名称排序采用自然数字顺序', async () => {
-    await applyPersonalSettingValue('outlineHierarchy', 'flat');
     await applyPersonalSettingValue('outlineSort', 'name');
     const names = (await openSampleAndRefresh()).symbols.map((symbol) => symbol.name);
     assert.ok(names.indexOf('item2') < names.indexOf('item10'));
   });
 
   test('INT-138 类型与名称排序把类型放在函数前', async () => {
-    await applyPersonalSettingValue('outlineHierarchy', 'flat');
     await applyPersonalSettingValue('outlineSort', 'typeName');
     const symbols = (await openSampleAndRefresh()).symbols;
     assert.ok(symbols.findIndex((symbol) => symbol.kind === 'Class') < symbols.findIndex((symbol) => symbol.kind === 'Function'));
@@ -242,12 +231,23 @@ suite('增强函数大纲', () => {
     assert.equal(api.outline.getStateForIntegrationTest().fileName, 'app.ts');
   });
 
-  test('INT-173 旧平铺字段仅兼容读取且运行固定树状', async () => {
-    await applyPersonalSettingValue('outlineHierarchy', 'flat');
-    const state = await openSampleAndRefresh();
-    const calculator = state.symbols.find((symbol) => symbol.name === 'Calculator');
-    assert.equal(state.preferences.hierarchy, 'tree');
-    assert.ok(calculator?.children.some((symbol) => symbol.name === 'add'));
+  test('INT-173 旧偏好不影响大纲树状显示和文件切换', async () => {
+    const config = getPersonalConfiguration('projectManager.symbolOutline');
+    const oldHierarchy = config.inspect('hierarchy')?.globalValue;
+    const oldFollow = config.inspect('followActiveEditor')?.globalValue;
+    try {
+      await config.update('hierarchy', 'flat', vscode.ConfigurationTarget.Global);
+      await config.update('followActiveEditor', false, vscode.ConfigurationTarget.Global);
+      const state = await openSampleAndRefresh();
+      assert.ok(state.symbols.find(symbol => symbol.name === 'Calculator')?.children.some(symbol => symbol.name === 'add'));
+      const api = await getApi();
+      await openText(projectUri(api, 'test-fixtures/workspace-one/src/app.ts'));
+      await api.outline.refreshSymbols('切换活动文件');
+      assert.equal(api.outline.getStateForIntegrationTest().fileName, 'app.ts');
+    } finally {
+      await config.update('hierarchy', oldHierarchy, vscode.ConfigurationTarget.Global);
+      await config.update('followActiveEditor', oldFollow, vscode.ConfigurationTarget.Global);
+    }
   });
 
   test('INT-175 C 符号结果接入条件编译层级并归并结构体重复项', async () => {
@@ -387,7 +387,6 @@ async function openSampleAndRefresh() {
 async function restoreOutlineDefaults(): Promise<void> {
   await applyPersonalSettingValue('outlineModeDefault', 'both');
   await applyPersonalSettingValue('outlineScope', 'functionsAndTypes');
-  await applyPersonalSettingValue('outlineHierarchy', 'tree');
   await applyPersonalSettingValue('outlineSort', 'source');
   await applyPersonalSettingValue('outlineAppearance', 'vscode');
   await applyPersonalSettingValue('showLineMetrics', true);

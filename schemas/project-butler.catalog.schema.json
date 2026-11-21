@@ -89,8 +89,8 @@
           "properties": {
             "autoOrganize": {
               "type": "boolean",
-              "default": false,
-              "description": "是否自动按文件夹整理标签页；关闭后仍可手动整理。"
+              "default": true,
+              "description": "首次打开工作区外文件时自动分栏。"
             }
           }
         },

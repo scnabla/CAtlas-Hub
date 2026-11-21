@@ -21,7 +21,7 @@ export interface CatalogFeatures {
 }
 
 export const DEFAULT_CATALOG_TAB_SETTINGS: CatalogTabSettings = {
-  autoOrganize: false,
+  autoOrganize: true,
 };
 
 export const DEFAULT_CATALOG_SYMBOL_OUTLINE_SETTINGS: CatalogSymbolOutlineSettings = {

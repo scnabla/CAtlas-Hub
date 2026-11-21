@@ -1,9 +1,9 @@
 /**
  * 已打开文件树的纯数据模型：按编辑器组、工作区和路径构建节点，并压缩公共目录部分。
  * 输入来自 openedFilesTreeProvider；显示名称和压缩路径不是资源唯一标识，不能用它们代替文件比较键。
- * 历史重复项和异常相对路径问题要求不同工作区、外部资源保持边界，不能跨根目录拼接公共路径。
+ * 历史重复项和异常相对路径问题要求不同工作区保持边界，不能跨根目录拼接公共路径。
  */
-export type OpenedFileNodeKind = 'group' | 'workspace' | 'directory' | 'externalGroup' | 'file';
+export type OpenedFileNodeKind = 'group' | 'workspace' | 'directory' | 'file';
 
 export interface OpenedFileDescriptor {
   readonly id: string;
@@ -12,10 +12,9 @@ export interface OpenedFileDescriptor {
   readonly uri: string;
   readonly groupId: string;
   readonly groupLabel: string;
-  readonly workspaceId?: string;
-  readonly workspaceLabel?: string;
+  readonly workspaceId: string;
+  readonly workspaceLabel: string;
   readonly pathSegments: readonly string[];
-  readonly external: boolean;
   readonly active: boolean;
   readonly preview: boolean;
 }
@@ -28,7 +27,6 @@ export interface OpenedFileTreeNode {
   readonly uri?: string;
   readonly groupId?: string;
   readonly tabId?: string;
-  readonly external?: boolean;
   readonly active?: boolean;
   readonly preview?: boolean;
 }
@@ -41,7 +39,6 @@ interface MutableNode {
   uri?: string;
   groupId?: string;
   tabId?: string;
-  external?: boolean;
   active?: boolean;
   preview?: boolean;
 }
@@ -97,19 +94,17 @@ export function flattenOpenedFileTree(nodes: readonly OpenedFileTreeNode[]): Ope
 }
 
 function buildGroupChildren(files: readonly OpenedFileDescriptor[], groupId: string): MutableNode[] {
-  const projectFiles = files.filter((file) => !file.external);
-  const externalFiles = files.filter((file) => file.external);
-  const workspaceOrder = unique(projectFiles.flatMap((file) => file.workspaceId === undefined ? [] : [file.workspaceId]));
+  const workspaceOrder = unique(files.map(file => file.workspaceId));
   const multipleWorkspaces = workspaceOrder.length > 1;
   const children: MutableNode[] = [];
 
   for (const workspaceId of workspaceOrder) {
-    const workspaceFiles = projectFiles.filter((file) => file.workspaceId === workspaceId);
+    const workspaceFiles = files.filter((file) => file.workspaceId === workspaceId);
     const workspaceChildren: MutableNode[] = [];
     for (const file of workspaceFiles) {
       insertFile(workspaceChildren, file, `group:${groupId}:workspace:${workspaceId}`);
     }
-    if (multipleWorkspaces) {
+    if (multipleWorkspaces || workspaceFiles.some(file => file.pathSegments.length === 1)) {
       children.push({
         id: `group:${groupId}:workspace:${workspaceId}`,
         kind: 'workspace',
@@ -120,20 +115,6 @@ function buildGroupChildren(files: readonly OpenedFileDescriptor[], groupId: str
     } else {
       children.push(...workspaceChildren);
     }
-  }
-
-  if (externalFiles.length > 0) {
-    const externalChildren: MutableNode[] = [];
-    for (const file of externalFiles) {
-      insertFile(externalChildren, file, `group:${groupId}:external`);
-    }
-    children.push({
-      id: `group:${groupId}:external`,
-      kind: 'externalGroup',
-      label: '工作区外文件',
-      groupId,
-      children: externalChildren,
-    });
   }
 
   return children;
@@ -169,7 +150,6 @@ function insertFile(
     uri: file.uri,
     groupId: file.groupId,
     tabId: file.id,
-    external: file.external,
     active: file.active,
     preview: file.preview,
     children: [],

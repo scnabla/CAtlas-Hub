@@ -1,0 +1,140 @@
+/dts-v1/;
+
+/* 虚构的采集板：两路温度报警、状态灯和一片用于保存采样记录的闪存。 */
+#define GPIO_ACTIVE_HIGH    0
+#define GPIO_ACTIVE_LOW     1
+#define BOARD_REVISION      2
+#define I2C_FAST_HZ         400000
+
+/ {
+    model = "Atlas Sensor Board";
+    compatible = "example,atlas-sensor-board", "example,atlas-soc";
+    #address-cells = <1>;
+    #size-cells = <1>;
+
+    aliases {
+        i2c0 = &i2c0;
+        spi0 = &spi0;
+    };
+
+    sampler {
+        compatible = "example,dual-channel-sampler";
+        sensors = <&temp_board>, <&temp_air>;
+        alert-gpios =
+            <&gpio0 7 GPIO_ACTIVE_LOW>,     // 板载探头
+            <&gpio1 3 GPIO_ACTIVE_HIGH>;    // 外接探头
+        channel-names = "board", "ambient";
+        sample-interval-ms = <1000>;
+
+        /* 前八个字节对应板载探头，后八个字节对应外接探头。 */
+        example,calibration-data = [
+            01 00 7F 80  12 34 AB CD
+            02 01 00 FF  56 78 DE EF
+        ];
+        storage-partition = <&sample_log>;
+        wakeup-source;
+    };
+
+    osc24m: clock-24m {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency = <24000000>;
+    };
+
+    leds {
+        compatible = "gpio-leds";
+
+        led-status {
+            label = "green:status";
+            gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+            default-state = "on";
+        };
+    };
+
+    soc {
+        compatible = "simple-bus";
+        #address-cells = <1>;
+        #size-cells = <1>;
+        ranges;
+
+        gpio0: gpio@40000000 {
+            compatible = "example,atlas-gpio";
+            reg = <0x40000000 0x1000>;
+            gpio-controller;
+            #gpio-cells = <2>;
+        };
+
+        gpio1: gpio@40001000 {
+            compatible = "example,atlas-gpio";
+            reg = <0x40001000 0x1000>;
+            gpio-controller;
+            #gpio-cells = <2>;
+        };
+
+        i2c0: i2c@40010000 {
+            compatible = "example,atlas-i2c";
+            reg = <0x40010000 0x1000>;
+            clocks = <&osc24m>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "disabled";
+        };
+
+        spi0: spi@40020000 {
+            compatible = "example,atlas-spi";
+            reg = <0x40020000 0x1000>;
+            clocks = <&osc24m>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "disabled";
+        };
+    };
+};
+
+/* 同一控制器按板卡版本选择总线速度。 */
+&i2c0 {
+#if BOARD_REVISION >= 2
+    clock-frequency = <I2C_FAST_HZ>;
+#else
+    clock-frequency = <100000>;
+#endif
+    status = "okay";
+
+    temp_board: temperature-sensor@48 {
+        compatible = "ti,tmp102";
+        reg = <0x48>;
+    };
+
+    temp_air: temperature-sensor@49 {
+        compatible = "ti,tmp102";
+        reg = <0x49>;
+    };
+};
+
+/* 通过完整路径启用 SPI。闪存地址从芯片内部的零偏移开始。 */
+&{/soc/spi@40020000} {
+    status = "okay";
+
+    flash@0 {
+        compatible = "jedec,spi-nor";
+        reg = <0>;
+        spi-max-frequency = <24000000>;
+
+        partitions {
+            compatible = "fixed-partitions";
+            #address-cells = <1>;
+            #size-cells = <1>;
+
+            partition@0 {
+                label = "factory-settings";
+                reg = <0x00000000 0x00010000>;
+                read-only;
+            };
+
+            sample_log: partition@10000 {
+                label = "sample-log";
+                reg = <0x00010000 0x000F0000>;
+            };
+        };
+    };
+};

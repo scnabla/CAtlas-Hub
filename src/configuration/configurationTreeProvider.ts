@@ -15,7 +15,7 @@ import { getTodoSettings } from '../todo/todoSettings';
 
 const COLLAPSE_STATE_KEY = 'projectManager.configurationView.groupExpansion';
 
-type GroupId = 'collection' | 'project' | 'todo' | 'ai' | 'external' | 'outlineAppearance';
+type GroupId = 'collection' | 'project' | 'todo' | 'ai' | 'outlineAppearance';
 
 interface SummaryNode { readonly kind: 'summary' }
 interface SettingsFileNode { readonly kind: 'settingsFile' }
@@ -57,10 +57,10 @@ export interface PersonalSettingDefinition {
 }
 
 const PERSONAL_SETTINGS = {
-  tabDefault: setting('非项目标签自动移至末尾', 'projectManager.tabs', 'autoOrganize', booleanChoices(), undefined, '开启后，仅将工作区外文件、设置页、扩展说明等非项目标签稳定移到末尾；项目内标签保持用户顺序。'),
+  tabDefault: setting('自动将外部文件分栏', 'projectManager.tabs', 'autoOrganize', booleanChoices(), undefined, '首次打开工作区外文件时，在右侧创建独立栏。'),
   openFilesView: setting('已打开文件视图', 'projectManager.tabs', 'openFilesView', [
     { label: '目录树', value: 'directoryTree' }, { label: 'VS Code 原生', value: 'native' },
-  ], undefined, '目录树显示在资源管理器中，只读取已打开的普通文件；不会扫描项目。'),
+  ], undefined, '点击编辑器右上角的“已打开文件”，按目录浏览当前工作区内的文件。'),
   outlineModeDefault: setting('函数大纲模式默认值', 'projectManager.symbolOutline', 'mode', [
     { label: '仅原生', value: 'native' }, { label: '仅增强', value: 'enhanced' }, { label: '同时使用', value: 'both' },
   ]),
@@ -72,10 +72,6 @@ const PERSONAL_SETTINGS = {
     { label: '开启', value: false },
     { label: '完全关闭', value: true },
   ], undefined, '直接修改用户级 chat.disableAIFeatures。完全关闭会隐藏并禁用 VS Code Chat、内联 AI 建议等内置功能，同时禁用 Copilot 扩展。拥有独立界面的第三方 Agent 扩展通常不会被直接禁用；依赖内置 Chat 的扩展能力将不可用。'),
-  externalEnabled: setting('工作区外文件标识', 'projectManager.externalFiles', 'enabled', booleanChoices()),
-  externalColor: setting('外部文件前景色', 'projectManager.externalFiles', 'showColor', booleanChoices()),
-  externalBadge: setting('外部文件 ‼ 徽标', 'projectManager.externalFiles', 'showBadge', booleanChoices()),
-  externalStatus: setting('外部文件状态栏提醒', 'projectManager.externalFiles', 'showStatusBar', booleanChoices()),
   iconStyle: setting('图标风格', 'projectManager.visuals', 'iconStyle', [
     { label: '简约彩色', value: 'unified' }, { label: 'VS Code 原生', value: 'native' },
   ], undefined, '简约彩色用不同轮廓和颜色区分项目、文件与代码符号；VS Code 原生使用主题图标和单色符号。高对比度主题自动采用原生树图标和单色大纲。活动栏图标保持不变。'),
@@ -85,9 +81,6 @@ const PERSONAL_SETTINGS = {
   todoProjectMarkers: setting('显示项目已有标记', 'projectManager.todo', 'showProjectMarkers', booleanChoices(), undefined, '默认关闭。开启后会扫描普通 TODO 和其他负责人的标记；大型或开源项目可能增加首次扫描耗时、CPU 占用和结果数量。'),
   outlineScope: setting('符号范围', 'projectManager.symbolOutline', 'scope', [
     { label: '仅函数', value: 'functions' }, { label: '函数与类型', value: 'functionsAndTypes' }, { label: '全部符号', value: 'all' },
-  ]),
-  outlineHierarchy: setting('层级方式', 'projectManager.symbolOutline', 'hierarchy', [
-    { label: '树状', value: 'tree' }, { label: '平铺', value: 'flat' },
   ]),
   outlineSort: setting('排序方式', 'projectManager.symbolOutline', 'sort', [
     { label: '源码顺序', value: 'source' }, { label: '名称', value: 'name' }, { label: '类型与名称', value: 'typeName' },
@@ -125,12 +118,6 @@ const GROUP_CHILDREN: Record<GroupId, readonly ConfigurationTreeNode[]> = {
   ],
   ai: [
     { kind: 'personalSetting', key: 'disableAiFeatures' },
-  ],
-  external: [
-    { kind: 'personalSetting', key: 'externalEnabled' },
-    { kind: 'personalSetting', key: 'externalColor' },
-    { kind: 'personalSetting', key: 'externalBadge' },
-    { kind: 'personalSetting', key: 'externalStatus' },
   ],
   outlineAppearance: [
     { kind: 'personalSetting', key: 'outlineAppearance' },
@@ -177,7 +164,6 @@ export class ConfigurationTreeProvider implements vscode.TreeDataProvider<Config
       { kind: 'group', id: 'project' },
       { kind: 'group', id: 'todo' },
       { kind: 'group', id: 'ai' },
-      { kind: 'group', id: 'external' },
       { kind: 'group', id: 'outlineAppearance' },
     ];
   }
@@ -197,6 +183,7 @@ export class ConfigurationTreeProvider implements vscode.TreeDataProvider<Config
   }
 
   public async configurePersonalSetting(key: PersonalSettingKey): Promise<void> {
+    if (!Object.hasOwn(PERSONAL_SETTINGS, key)) return;
     if (key === 'disableAiFeatures' && !this.capabilities.chatDisableAiFeatures.supported) {
       await this.interaction.showWarning(
         this.capabilities.chatDisableAiFeatures.reason
@@ -282,7 +269,6 @@ export class ConfigurationTreeProvider implements vscode.TreeDataProvider<Config
         description: getPersonalConfiguration('chat').get<boolean>('disableAIFeatures', false) ? '已完全关闭' : '已开启',
         icon: 'sparkle',
       },
-      external: { label: '工作区外文件提醒', icon: 'warning', semantic: 'external-file' },
       outlineAppearance: { label: '函数大纲显示', icon: 'symbol-method', semantic: 'symbol.method' },
     };
     const definition = data[id];
@@ -301,10 +287,10 @@ export class ConfigurationTreeProvider implements vscode.TreeDataProvider<Config
     const memberCatalog = catalog !== undefined && this.service.projectContext.kind === 'member';
     if (key === 'autoOrganize') {
       const effective = resolveEffectiveTabSettings(this.service.currentProjectTabSettings);
-      const item = new vscode.TreeItem('非项目标签自动移至末尾', vscode.TreeItemCollapsibleState.None);
+      const item = new vscode.TreeItem('自动将外部文件分栏', vscode.TreeItemCollapsibleState.None);
       item.description = effective.values.autoOrganize ? '开启' : '关闭';
       item.iconPath = new vscode.ThemeIcon(effective.values.autoOrganize ? 'pass-filled' : 'circle-slash');
-      item.command = { command: 'projectManager.configureCatalogTabSetting', title: '配置非项目标签自动移至末尾', arguments: ['autoOrganize'] };
+      item.command = { command: 'projectManager.configureCatalogTabSetting', title: '配置自动将外部文件分栏', arguments: ['autoOrganize'] };
       item.tooltip = `来源：${effective.sources.autoOrganize}。\n` + (memberCatalog
         ? `当前项目属于“${catalog.name}”。可设置集合覆盖值，或选择“跟随个人默认”。`
         : '当前项目不属于活动集合，点击后修改个人默认值。');

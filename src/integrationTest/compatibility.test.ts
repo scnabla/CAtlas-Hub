@@ -3,12 +3,12 @@ import * as vscode from 'vscode';
 import { createExportText, parseImportText } from '../projectCatalog/catalogTransfer';
 import { getApi, projectUri } from './helpers';
 suite('1.0.0 导出格式兼容夹具', () => {
-  test('INT-219 v1 导出夹具使用旧版默认值并恢复项目', async () => {
+  test('INT-219 v1 未声明标签设置时默认开启外部文件分栏并恢复项目', async () => {
     const { text, uri } = await readFixture('export-v1.project-butler-export.json');
     const preview = parseImportText(text, uri);
     assert.equal(preview.sourceKind, 'export');
     assert.equal(preview.catalogs[0]?.name, '导出 v1');
-    assert.deepEqual(preview.catalogs[0]?.features.tabs, { autoOrganize: false });
+    assert.deepEqual(preview.catalogs[0]?.features.tabs, { autoOrganize: true });
     assert.deepEqual(preview.catalogs[0]?.features.symbolOutline, { mode: 'both' });
     assert.deepEqual(preview.catalogs[0]?.features.todo, {});
     assert.equal(preview.catalogs[0]?.projects.length, 1);

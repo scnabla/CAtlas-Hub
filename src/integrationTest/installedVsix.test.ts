@@ -1,5 +1,8 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
+import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { createEmptyCatalogLibrary } from '../projectCatalog/catalogStore';
 import type { ProjectButlerApi } from '../testing/projectButlerApi';
 
@@ -28,6 +31,86 @@ suite('已安装 VSIX', () => {
 
   });
 
+  test('INT-243 设备树 overlay 文件按内容分色', async () => {
+    const sample = vscode.Uri.file(path.resolve(__dirname, '../../test-fixtures/devicetree/board.overlay'));
+    const doc = await vscode.workspace.openTextDocument(sample);
+    assert.equal(doc.languageId, 'dts');
+
+    type Token = { c: string; t: string };
+    const tokens = await vscode.commands.executeCommand<Token[]>('_workbench.captureSyntaxTokens', sample);
+    const expected = [
+      ['sensor', 'entity.name.type.node'], ['48', 'constant.numeric.address'],
+      ['sensor0', 'entity.name.function.label'], ['#address-cells', 'variable.other.property'],
+      ['#include', 'keyword.control.directive'], ['alert-gpios', 'variable.other.property'],
+      ['&gpio2', 'variable.other.constant.reference'], ['7', 'constant.numeric'],
+      ['GPIO_ACTIVE_LOW', 'entity.name.function.preprocessor'], ['FF', 'constant.numeric.byte'],
+      ['"okay"', 'string.quoted'], ['&{/soc/i2c@4000}', 'variable.other.constant.reference'],
+    ] as const;
+    for (const [text, scope] of expected) {
+      assert.ok(tokens.some(token => token.c.trim() === text && token.t.includes(scope)), text);
+    }
+  });
+
+  test('INT-244 设备树大纲只列节点，按源码层级跳转并跟随光标', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const uri = vscode.Uri.file(path.resolve(__dirname, '../../test-fixtures/devicetree/atlas-sensor-board.dts'));
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(doc);
+    await api.outline.refreshSymbols('设备树节点跳转');
+    const roots = api.outline.getStateForIntegrationTest().symbols;
+    assert.deepEqual(roots.map(node => node.name), ['/', '&i2c0', '&{/soc/spi@40020000}']);
+    const bus = roots[1]!;
+    assert.deepEqual(bus.children.map(node => node.name),
+      ['temp_board: temperature-sensor@48', 'temp_air: temperature-sensor@49']);
+    const sensor = bus.children[1]!;
+    assert.equal(sensor.children.length, 0);
+    const partition = roots[2]!.children[0]?.children[0]?.children[1];
+    assert.equal(partition?.name, 'sample_log: partition@10000');
+    for (const node of [bus, sensor, partition!]) {
+      await api.outline.jumpToSymbolForIntegrationTest(node.id);
+      assert.equal(doc.getText(editor.selection), node.name);
+      assert.equal(api.outline.getStateForIntegrationTest().currentId, node.id);
+    }
+    const reg = doc.getText().indexOf('reg = <0x49>');
+    assert.ok(reg >= 0);
+    const pos = doc.positionAt(reg);
+    editor.selection = new vscode.Selection(pos, pos);
+    assert.equal(api.outline.getStateForIntegrationTest().currentId, sensor.id);
+  });
+
+  test('INT-245 四种设备树后缀在打开时报告错误，修正后清除诊断', async () => {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), 'catlas-dts-'));
+    const invalid = '&external { data = [01 GG]; };';
+    const valid = invalid.replace('GG', 'FF');
+    async function waitFor(uri: vscode.Uri, count: number) {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const items = vscode.languages.getDiagnostics(uri).filter(d => d.source === 'CAtlas Hub');
+        if (items.length === count) return items;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error('设备树诊断数量未更新：' + uri.fsPath);
+    }
+    try {
+      for (const suffix of ['dts', 'dtsi', 'dtso', 'overlay']) {
+        const uri = vscode.Uri.file(path.join(dir, 'board.' + suffix));
+        await fs.writeFile(uri.fsPath, invalid);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const [error] = await waitFor(uri, 1);
+        assert.equal(doc.getText(error!.range), 'GG');
+        assert.equal(error!.severity, vscode.DiagnosticSeverity.Error);
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(uri, error!.range, 'FF');
+        assert.ok(await vscode.workspace.applyEdit(edit));
+        assert.equal(doc.getText(), valid);
+        assert.ok(doc.isDirty);
+        await waitFor(uri, 0);
+        await doc.save();
+      }
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('INT-159 已安装扩展在空集合状态显示首次使用入口', async () => {
     const extension = vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!;
     const api = await extension.activate();
@@ -44,5 +127,252 @@ suite('已安装 VSIX', () => {
     const after = (await vscode.commands.getCommands(true)).filter((command) => command.startsWith('projectManager.'));
     assert.deepEqual(after.sort(), before.sort());
     assert.equal(new Set(after).size, after.length);
+  });
+  test('INT-246 首个外部文件独立分栏、保留未保存内容并在全部关闭后收起', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const config = vscode.workspace.getConfiguration('projectManager.tabs');
+    const original = config.inspect<boolean>('autoOrganize')?.workspaceValue;
+    const folder = vscode.workspace.workspaceFolders![0]!.uri;
+    const dir = await fs.mkdtemp(path.join(tmpdir(), 'catlas-group-'));
+    const externalUri = vscode.Uri.file(path.join(dir, 'external.txt'));
+    const secondUri = vscode.Uri.file(path.join(dir, 'second.txt'));
+    const groupList = () => vscode.window.tabGroups.all;
+    const uriOf = (tab: vscode.Tab) => tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputCustom ? tab.input.uri : undefined;
+    const groupOf = (uri: vscode.Uri) => groupList().find(group => group.tabs.some(tab => uriOf(tab)?.toString() === uri.toString()));
+    const marker = (tab: vscode.Tab) => uriOf(tab)?.scheme === 'catlas-external-files';
+    try {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await config.update('autoOrganize', undefined, vscode.ConfigurationTarget.Workspace);
+      assert.equal(vscode.workspace.getConfiguration('projectManager.tabs').get('autoOrganize'), true);
+      const settings = vscode.workspace.getConfiguration('workbench.editor');
+      assert.equal(settings.get('showTabs'), 'multiple');
+      assert.equal(settings.get('wrapTabs'), true);
+      const internal = vscode.Uri.joinPath(folder, 'README.md');
+      await vscode.window.showTextDocument(internal, { preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      assert.equal(groupList().length, 1);
+      const userTab = vscode.Uri.joinPath(folder, 'src', 'app.ts');
+      await vscode.window.showTextDocument(userTab, { viewColumn: vscode.ViewColumn.Two, preview: false });
+      await fs.writeFile(externalUri.fsPath, 'original');
+      await fs.writeFile(secondUri.fsPath, 'second');
+      const editor = await vscode.window.showTextDocument(externalUri, { preview: false });
+      await editor.edit(edit => edit.insert(new vscode.Position(0, 0), 'dirty '));
+      await api.tabs.waitForIdleForIntegrationTest();
+      const right = groupOf(externalUri);
+      assert.equal(groupList().length, 3, JSON.stringify(groupList().map(g => g.tabs.map(t => t.label))));
+      assert.equal(right?.viewColumn, vscode.ViewColumn.Three);
+      assert.ok(right?.tabs[0] && marker(right.tabs[0]) && right.tabs[0].isPinned);
+      assert.ok(!vscode.workspace.textDocuments.some(doc => doc.uri.scheme === 'catlas-external-files'), '外部文件页应能独立于文本文档打开');
+      assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), externalUri.toString());
+      assert.equal(editor.document.getText(), 'dirty original');
+      assert.equal(editor.document.isDirty, true);
+      assert.equal(await fs.readFile(externalUri.fsPath, 'utf8'), 'original');
+      await vscode.window.showTextDocument(secondUri, { viewColumn: vscode.ViewColumn.One, preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      assert.equal(groupOf(secondUri)?.viewColumn, right.viewColumn);
+      const list = await vscode.workspace.openTextDocument(uriOf(right.tabs[0])!);
+      // 内容提供器的变更由 VS Code 异步应用到已打开的只读文档。
+      const listsBothFiles = () => list.getText().includes(externalUri.fsPath) && list.getText().includes(secondUri.fsPath);
+      for (let attempt = 0; attempt < 40 && !listsBothFiles(); attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      assert.ok(listsBothFiles(), list.getText());
+      await vscode.window.showTextDocument(internal, { viewColumn: right.viewColumn, preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      assert.equal(groupOf(internal)?.viewColumn, vscode.ViewColumn.One);
+      assert.ok(!right.tabs.some(tab => uriOf(tab)?.toString() === internal.toString()));
+      await editor.document.save();
+      await vscode.window.tabGroups.close(right.tabs.filter(tab => !marker(tab)));
+      await api.tabs.waitForIdleForIntegrationTest();
+      assert.equal(groupList().length, 2);
+      assert.equal(groupOf(userTab)?.viewColumn, vscode.ViewColumn.Two);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await api.tabs.waitForIdleForIntegrationTest();
+      await vscode.window.showTextDocument(secondUri, { preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      assert.equal(groupList().length, 2, '仅打开外部文件时应保留左栏');
+      assert.equal(groupOf(secondUri)?.viewColumn, vscode.ViewColumn.Two);
+      assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), secondUri.toString());
+      await vscode.window.showTextDocument(internal, { preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      assert.equal(groupOf(internal)?.viewColumn, vscode.ViewColumn.One);
+      const layout = vscode.workspace.getConfiguration('workbench.editor');
+      const closeEmpty = layout.inspect<boolean>('closeEmptyGroups')?.workspaceValue;
+      try {
+        await layout.update('closeEmptyGroups', false, vscode.ConfigurationTarget.Workspace);
+        const outside = groupOf(secondUri)?.tabs.find(tab => uriOf(tab)?.toString() === secondUri.toString());
+        assert.ok(outside);
+        await vscode.window.tabGroups.close(outside);
+        await api.tabs.waitForIdleForIntegrationTest();
+        assert.equal(groupList().length, 1, '外部栏收起后项目恢复为单栏');
+      } finally {
+        await layout.update('closeEmptyGroups', closeEmpty, vscode.ConfigurationTarget.Workspace);
+      }
+      for (const delay of [0, 35, 55]) {
+        await vscode.window.showTextDocument(secondUri, { viewColumn: vscode.ViewColumn.One, preserveFocus: true, preview: false });
+        await new Promise(resolve => setTimeout(resolve, delay));
+        await vscode.window.showTextDocument(internal, { viewColumn: vscode.ViewColumn.One, preview: false });
+        await api.tabs.waitForIdleForIntegrationTest();
+        assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), internal.toString(), '切回项目文件后应保留焦点');
+        const group = groupOf(secondUri);
+        const outside = group?.tabs.find(tab => uriOf(tab)?.toString() === secondUri.toString());
+        assert.ok(outside && group?.viewColumn === vscode.ViewColumn.Two);
+        await vscode.window.tabGroups.close(outside);
+        await api.tabs.waitForIdleForIntegrationTest();
+      }
+    } finally {
+      const doc = vscode.workspace.textDocuments.find(item => item.uri.toString() === externalUri.toString());
+      if (doc?.isDirty) await doc.save();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await config.update('autoOrganize', original, vscode.ConfigurationTarget.Workspace);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('INT-247 外部文件路径原生跳转，按目录及打开顺序排列', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const config = vscode.workspace.getConfiguration('projectManager.tabs');
+    const original = config.inspect<boolean>('autoOrganize')?.workspaceValue;
+    const root = await fs.mkdtemp(path.join(tmpdir(), 'catlas-path-links-'));
+    const file = (relative: string) => vscode.Uri.file(path.join(root, relative));
+    const a = file('A/src/一 #%.txt');
+    const b = file('B/src/同名 file.txt');
+    const c = file('A/src/同名 file.txt');
+    const marker = vscode.Uri.from({ scheme: 'catlas-external-files', path: '/↗ 外部文件' });
+    const list = () => vscode.workspace.openTextDocument(marker);
+    const column = () => vscode.window.tabGroups.all.find(group => group.tabs.some(tab =>
+      (tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputCustom) && tab.input.uri.scheme === marker.scheme))?.viewColumn;
+    const show = async (uri: vscode.Uri) => {
+      await vscode.window.showTextDocument(uri, { viewColumn: vscode.ViewColumn.One, preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+    };
+    const checkRows = async (uris: vscode.Uri[]) => {
+      const doc = await list();
+      const expected = ['双击路径，或按住 Ctrl 并点击路径，跳转到文件', ...uris.map(uri => uri.fsPath)];
+      for (let i = 0; i < 80 && doc.getText().split(/\r?\n/).join('\n') !== expected.join('\n'); i++) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      assert.deepEqual(doc.getText().split(/\r?\n/), expected);
+      const links = await vscode.commands.executeCommand<vscode.DocumentLink[]>('vscode.executeLinkProvider', marker);
+      assert.deepEqual(links?.map(link => [link.range.start.line, doc.getText(link.range), link.target?.toString()]),
+        uris.map((uri, index) => [index + 1, uri.fsPath, uri.toString()]));
+    };
+    try {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await config.update('autoOrganize', true, vscode.ConfigurationTarget.Workspace);
+      await show(vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0]!.uri, 'README.md'));
+      for (const uri of [a, b, c]) {
+        await fs.mkdir(path.dirname(uri.fsPath), { recursive: true });
+        await fs.writeFile(uri.fsPath, 'test');
+        await show(uri);
+      }
+      await checkRows([a, c, b]);
+      const provider = api.openedFilesTree.provider;
+      provider.refresh();
+      const roots = provider.getChildren();
+      assert.equal(roots.length, 1);
+      assert.deepEqual(roots[0]?.children.map(node => node.uri),
+        [vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0]!.uri, 'README.md').toString()]);
+
+      await vscode.commands.executeCommand('moveActiveEditor', { by: 'tab', to: 'first' });
+      await checkRows([a, c, b]);
+      const right = column();
+      assert.ok(right);
+      const links = await vscode.commands.executeCommand<vscode.DocumentLink[]>('vscode.executeLinkProvider', marker);
+      assert.ok(links?.[0]?.target);
+      await vscode.commands.executeCommand('vscode.open', links[0].target, { viewColumn: right });
+      assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), a.toString());
+      assert.equal(vscode.window.activeTextEditor?.viewColumn, right);
+      const first = vscode.window.tabGroups.activeTabGroup.activeTab;
+      assert.ok(first);
+      await vscode.window.tabGroups.close(first);
+      await api.tabs.waitForIdleForIntegrationTest();
+      await checkRows([c, b]);
+      await show(a);
+      await checkRows([c, a, b]);
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await config.update('autoOrganize', original, vscode.ConfigurationTarget.Workspace);
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+  test('INT-248 编辑区只打开一个已打开文件，文件位于公共目录下', async () => {
+    const extension = vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!;
+    const api = await extension.activate();
+    const contributions = extension.packageJSON.contributes;
+    const command = 'projectManager.openOpenedFilesDirectory';
+    assert.ok(contributions.menus['editor/title'].some((item: { command: string }) => item.command === command));
+    assert.ok(!contributions.views.explorer.some((item: { id: string }) => item.id === 'projectManager.openedFilesView'));
+    try {
+      const uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0]!.uri, 'src', 'app.ts');
+      await vscode.window.showTextDocument(uri, { preview: false });
+      await vscode.commands.executeCommand(command);
+      await vscode.commands.executeCommand(command);
+      const pages = () => vscode.window.tabGroups.all.flatMap(group => group.tabs)
+        .filter(tab => tab.input instanceof vscode.TabInputWebview && tab.label === '已打开文件');
+      for (let i = 0; i < 50 && pages().length === 0; i++) await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(pages().length, 1);
+      const provider = api.openedFilesTree.provider;
+      provider.refresh();
+      const pending = provider.getChildren();
+      while (pending.length) {
+        const node = pending.pop()!;
+        if (node.kind === 'directory' && node.label === 'src/' && node.children.some(file => file.uri === uri.toString())) return;
+        pending.push(...node.children);
+      }
+      assert.fail('src/ 下缺少 app.ts');
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+  test('INT-249 已有固定文件时目录页仍固定在首位', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const root = vscode.workspace.workspaceFolders![0]!.uri;
+    const readme = vscode.Uri.joinPath(root, 'README.md');
+    const app = vscode.Uri.joinPath(root, 'src', 'app.ts');
+    const group = () => vscode.window.tabGroups.activeTabGroup;
+    const tabs = () => group().tabs.map(tab => [tab.label, tab.isPinned]);
+    try {
+      await api.tabs.waitForIdleForIntegrationTest();
+      await vscode.window.tabGroups.close(vscode.window.tabGroups.all.flatMap(item => item.tabs));
+      await api.tabs.waitForIdleForIntegrationTest();
+      await vscode.window.showTextDocument(readme, { preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      await vscode.commands.executeCommand('workbench.action.pinEditor');
+      await api.tabs.waitForIdleForIntegrationTest();
+      await vscode.window.showTextDocument(app, { preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      assert.equal(group().activeTab?.label, 'app.ts');
+      await vscode.commands.executeCommand('projectManager.openOpenedFilesDirectory');
+      const expected = [['已打开文件', true], ['README.md', true], ['app.ts', false]];
+      for (let i = 0; i < 80 && JSON.stringify(tabs()) !== JSON.stringify(expected); i++) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      assert.deepEqual(tabs(), expected);
+      await vscode.window.showTextDocument(app, { preview: false });
+      assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), app.toString());
+      assert.deepEqual(tabs(), expected);
+      await vscode.commands.executeCommand('projectManager.openOpenedFilesDirectory');
+      assert.deepEqual(tabs(), expected);
+    } finally {
+      await vscode.window.tabGroups.close([...group().tabs]);
+    }
+  });
+  test('INT-250 安装后不再注册过时的大纲选项和工作区外文件提醒', async () => {
+    const extension = vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!;
+    const { contributes } = extension.packageJSON;
+    const api = await extension.activate();
+    const roots = api.catalogs.configurationProvider.getChildren();
+    assert.ok(!roots.some(node => node.kind === 'group' && String(node.id) === 'external'));
+    const settings = contributes.configuration.properties;
+    for (const key of ['externalFiles.enabled', 'externalFiles.showColor', 'externalFiles.showBadge',
+      'externalFiles.showStatusBar', 'symbolOutline.hierarchy', 'symbolOutline.followActiveEditor']) {
+      assert.ok(!Object.hasOwn(settings, 'projectManager.' + key), key);
+    }
+    const colors = contributes.colors.map((entry: { id: string }) => entry.id);
+    assert.ok(!colors.includes('projectManager.externalFileForeground'));
+    assert.ok(colors.includes('projectManager.fileListPathForeground'));
+    assert.ok(colors.includes('projectManager.fileListNameForeground'));
+    assert.ok(!contributes.menus['editor/title'].some((entry: { command: string }) => entry.command === 'projectManager.diagnoseActiveFile'));
   });
 });
