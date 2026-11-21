@@ -45,6 +45,12 @@
   "contributes": {
     "customEditors": [
       {
+        "viewType": "projectManager.openedFilesDirectory",
+        "displayName": "已打开文件",
+        "selector": [{ "filenamePattern": "已打开文件" }],
+        "priority": "option"
+      },
+      {
         "viewType": "projectManager.externalFileList",
         "displayName": "外部文件清单",
         "selector": [{ "filenamePattern": "↗ 外部文件" }],

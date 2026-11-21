@@ -51,8 +51,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Projec
     }
   }));
   context.subscriptions.push(bindTodoFeatureConfigurationSource(catalogs.service));
-  const tabs = registerTabManagement(context, output, catalogs.service);
   const openedFilesTree = registerOpenedFilesTree(context, output);
+  const tabs = registerTabManagement(context, output, catalogs.service, openedFilesTree.page);
   const outline = registerSymbolOutline(context, output, catalogs.service);
   const todo = registerTodo(context, output, catalogs.service, catalogs.initialization);
   output.appendLine('CAtlas Hub已激活。');

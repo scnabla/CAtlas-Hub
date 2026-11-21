@@ -233,7 +233,7 @@ suite('已安装 VSIX', () => {
     const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
     const config = vscode.workspace.getConfiguration('projectManager.tabs');
     const original = config.inspect<boolean>('autoOrganize')?.workspaceValue;
-    const root = await fs.mkdtemp(path.join(tmpdir(), 'catlas-path-links-'));
+    const root = await fs.realpath(await fs.mkdtemp(path.join(tmpdir(), 'catlas-path-links-')));
     const file = (relative: string) => vscode.Uri.file(path.join(root, relative));
     const a = file('A/src/一 #%.txt');
     const b = file('B/src/同名 file.txt');
@@ -293,7 +293,9 @@ suite('已安装 VSIX', () => {
     } finally {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       await config.update('autoOrganize', original, vscode.ConfigurationTarget.Workspace);
-      await fs.rm(root, { recursive: true, force: true });
+      await vscode.window.tabGroups.close(vscode.window.tabGroups.all.flatMap(group => group.tabs));
+      await api.tabs.waitForIdleForIntegrationTest();
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
   test('INT-248 编辑区只打开一个已打开文件，文件位于公共目录下', async () => {
@@ -309,7 +311,7 @@ suite('已安装 VSIX', () => {
       await vscode.commands.executeCommand(command);
       await vscode.commands.executeCommand(command);
       const pages = () => vscode.window.tabGroups.all.flatMap(group => group.tabs)
-        .filter(tab => tab.input instanceof vscode.TabInputWebview && tab.label === '已打开文件');
+        .filter(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'projectManager.openedFilesDirectory' && tab.label === '已打开文件');
       for (let i = 0; i < 50 && pages().length === 0; i++) await new Promise(resolve => setTimeout(resolve, 50));
       assert.equal(pages().length, 1);
       const provider = api.openedFilesTree.provider;
@@ -375,4 +377,57 @@ suite('已安装 VSIX', () => {
     assert.ok(colors.includes('projectManager.fileListNameForeground'));
     assert.ok(!contributes.menus['editor/title'].some((entry: { command: string }) => entry.command === 'projectManager.diagnoseActiveFile'));
   });
+  test('INT-251 已打开文件按工作区标签和视图配置自动恢复或收起', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const config = vscode.workspace.getConfiguration('projectManager.tabs');
+    const original = config.inspect<string>('openFilesView')?.workspaceValue;
+    const tabs = () => vscode.window.tabGroups.all.flatMap(group => group.tabs);
+    const pages = () => tabs().filter(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'projectManager.openedFilesDirectory' && tab.label === '已打开文件');
+    const file = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0]!.uri, 'README.md');
+    const wait = async (expected: boolean) => {
+      for (let i = 0; i < 80; i++) {
+        const current = pages();
+        if (expected ? current.length === 1 && current[0]!.isPinned && current[0]!.group.tabs[0] === current[0]
+          && vscode.window.activeTextEditor?.document.uri.toString() === file.toString() : !current.length) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      assert.fail(JSON.stringify(tabs().map(tab => [tab.label, tab.isPinned, tab.isActive, tab.group.viewColumn])));
+    };
+    try {
+      await vscode.window.tabGroups.close(tabs());
+      await api.tabs.waitForIdleForIntegrationTest();
+      await vscode.window.showTextDocument(file, { preview: false });
+      await wait(true);
+      const column = pages()[0]!.group.viewColumn;
+      for (let i = 0; i < 2; i++) {
+        await vscode.window.tabGroups.close(pages()[0]!, true);
+        await wait(true);
+        assert.equal(pages()[0]!.group.viewColumn, column);
+      }
+      await config.update('openFilesView', 'native', vscode.ConfigurationTarget.Workspace);
+      await api.tabs.waitForIdleForIntegrationTest();
+      await wait(false);
+      await vscode.commands.executeCommand('projectManager.openOpenedFilesDirectory');
+      await wait(false);
+      // 避免切回目录树时出现原生视图选择提示，保留该窗口原有选择。
+      const key = 'projectManager.openedFilesView.nativeOpenEditorsDecision';
+      const decision = api.context.globalState.get(key);
+      try {
+        await api.context.globalState.update(key, 'declined');
+        await config.update('openFilesView', 'directoryTree', vscode.ConfigurationTarget.Workspace);
+        await wait(true);
+        const source = tabs().find(tab => tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === file.toString());
+        assert.ok(source);
+        await vscode.window.tabGroups.close(source);
+        await api.tabs.waitForIdleForIntegrationTest();
+        await wait(false);
+      } finally {
+        await api.context.globalState.update(key, decision);
+      }
+    } finally {
+      await config.update('openFilesView', original, vscode.ConfigurationTarget.Workspace);
+      await vscode.window.tabGroups.close(tabs());
+    }
+  });
+
 });

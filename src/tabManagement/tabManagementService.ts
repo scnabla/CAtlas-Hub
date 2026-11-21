@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { openFileListTab } from './fileListPage';
+import { OpenedFilesDirectoryPage } from './openedFilesDirectoryPage';
 import { onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 import { ProjectFeatureConfigurationSource } from '../configuration/configurationTypes';
 import { getUriComparisonKey } from '../shared/uri';
@@ -42,7 +44,8 @@ export class TabManagementService implements vscode.Disposable {
   private disposed = false;
   private ownedGroup: vscode.TabGroup | undefined;
 
-  constructor(private readonly output: vscode.OutputChannel, private readonly catalog: ProjectFeatureConfigurationSource, state: vscode.Memento) {
+  constructor(private readonly output: vscode.OutputChannel, private readonly catalog: ProjectFeatureConfigurationSource, state: vscode.Memento,
+    private readonly directory: OpenedFilesDirectoryPage) {
     this.fileList = new ExternalFileList(state);
     this.disposables = [
       this.fileList,
@@ -167,6 +170,7 @@ export class TabManagementService implements vscode.Disposable {
         }
       }
     }
+    await this.directory.reconcile();
   }
 
   private async openMarker(): Promise<vscode.TabGroup | undefined> {
@@ -177,26 +181,17 @@ export class TabManagementService implements vscode.Disposable {
       const uri = uriOf(tab);
       return uri && isExternal(uri);
     });
-    if (!reuse) {
-      if (sourceColumn !== lastColumn) {
-        await vscode.commands.executeCommand('workbench.action.focusLastEditorGroup');
-      }
+    const column = reuse ? previous.viewColumn : lastColumn + 1;
+    const splitDown = vscode.workspace.getConfiguration('workbench.editor').get('openSideBySideDirection') === 'down';
+    if (!reuse && splitDown) {
+      if (sourceColumn !== lastColumn) await vscode.commands.executeCommand('workbench.action.focusLastEditorGroup');
       await vscode.commands.executeCommand('workbench.action.newGroupRight');
     }
-    const column = reuse ? previous.viewColumn : lastColumn + 1;
-    await vscode.commands.executeCommand('vscode.openWith', markerUri, externalEditorId, { viewColumn: column, preview: false });
-    if (externalTabUri(groups().activeTabGroup.activeTab)) await vscode.commands.executeCommand('workbench.action.pinEditor');
-    // 固定标识需要暂时激活右栏。返回来源栏，由 VS Code 恢复用户最后选中的标签。
-    if (sourceColumn !== column) {
-      const tab = groupAt(sourceColumn)?.activeTab;
-      const uri = uriOf(tab);
-      if (uri) {
-        await vscode.window.showTextDocument(uri, { viewColumn: sourceColumn, preview: tab?.isPreview ?? false });
-      } else {
-        const names = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth'];
-        const name = names[sourceColumn - 1];
-        if (name) await vscode.commands.executeCommand('workbench.action.focus' + name + 'EditorGroup');
-      }
+    await openFileListTab(markerUri, externalEditorId, column, true);
+    if (!reuse && splitDown && groups().activeTabGroup.viewColumn === column) {
+      const names = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth'];
+      const name = names[sourceColumn - 1];
+      if (name) await vscode.commands.executeCommand('workbench.action.focus' + name + 'EditorGroup');
     }
     return externalGroup();
   }

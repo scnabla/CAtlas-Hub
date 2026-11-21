@@ -9,6 +9,14 @@ export interface FileListRow {
   pathPrefix?: string;
 }
 
+// vscode.openWith 的公开选项无法同时指定后台打开、固定和首位。
+// 使用其工作台命令，以一次操作插入清单，避免切走正在编辑的文档。
+export async function openFileListTab(uri: vscode.Uri, editorId: string, column: vscode.ViewColumn, background: boolean): Promise<void> {
+  await vscode.commands.executeCommand('_workbench.openWith', uri, editorId, [
+    column - 1, { sticky: true, index: 0, pinned: true, inactive: background, preserveFocus: background },
+  ]);
+}
+
 export function fileListGesture(uri: vscode.Uri, subject: '路径' | '文件名') {
   const config = vscode.workspace.getConfiguration('editor', { uri, languageId: 'plaintext' });
   const mac = process.platform === 'darwin';

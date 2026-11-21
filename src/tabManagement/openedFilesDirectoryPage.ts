@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { bindFileListPage, FileListRow } from './fileListPage';
+import { bindFileListPage, FileListRow, openFileListTab } from './fileListPage';
 import { getUriDisplayPath } from '../shared/uri';
 import { externalTabUri } from './externalFileList';
 import { OpenedFileTreeNode } from './openedFilesTreeModel';
@@ -9,69 +9,55 @@ export const directoryPageId = 'projectManager.openedFilesDirectory';
 const pageTitle = '已打开文件';
 const directoryUri = vscode.Uri.from({ scheme: 'catlas-opened-files', path: '/' + pageTitle });
 
-export class OpenedFilesDirectoryPage implements vscode.WebviewPanelSerializer, vscode.Disposable {
-  private panel: vscode.WebviewPanel | undefined;
+const isDirectoryTab = (tab: vscode.Tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === directoryPageId;
 
-  constructor(private readonly provider: OpenedFilesTreeProvider) {}
+export class OpenedFilesDirectoryPage implements vscode.CustomReadonlyEditorProvider, vscode.WebviewPanelSerializer {
+  private previousGroup: vscode.TabGroup | undefined;
 
-  show(): void {
-    if (this.panel) {
-      this.panel.reveal(this.panel.viewColumn);
+  constructor(private readonly provider: OpenedFilesTreeProvider, private readonly enabled: () => boolean) {}
+
+  async reconcile(): Promise<void> {
+    const groups = vscode.window.tabGroups.all;
+    const existing = groups.flatMap(group => group.tabs).filter(isDirectoryTab);
+    const candidates = groups.filter(group => !group.tabs.some(externalTabUri) && group.tabs.some(tab =>
+      tab.input instanceof vscode.TabInputText && vscode.workspace.getWorkspaceFolder(tab.input.uri)));
+    if (!this.enabled() || !candidates.length) {
+      if (existing.length) await vscode.window.tabGroups.close(existing, true);
       return;
     }
+    const tab = existing[0];
+    const group = tab && !tab.group.tabs.some(externalTabUri) ? tab.group
+      : this.previousGroup && candidates.includes(this.previousGroup) ? this.previousGroup : candidates[0]!;
+    this.previousGroup = group;
+    if (!tab || tab.group !== group || !tab.isPinned || group.tabs[0] !== tab) {
+      await openFileListTab(directoryUri, directoryPageId, group.viewColumn, true);
+    }
+    const duplicates = existing.filter(item => item.group !== group);
+    if (duplicates.length) await vscode.window.tabGroups.close(duplicates, true);
+  }
+
+  async show(): Promise<void> {
+    if (!this.enabled()) return;
     const groups = vscode.window.tabGroups;
-    const primary = groups.all.find(group => !group.tabs.some(tab => externalTabUri(tab)));
-    const column = groups.activeTabGroup.tabs.some(tab => externalTabUri(tab)) ? primary?.viewColumn : groups.activeTabGroup.viewColumn;
-    this.attach(vscode.window.createWebviewPanel(directoryPageId, pageTitle, column ?? vscode.ViewColumn.Active,
-      { enableFindWidget: true, localResourceRoots: [] }));
+    const group = groups.all.find(item => item.tabs.some(isDirectoryTab))
+      ?? (groups.activeTabGroup.tabs.some(externalTabUri) ? groups.all.find(item => !item.tabs.some(externalTabUri)) : groups.activeTabGroup);
+    if (group) await openFileListTab(directoryUri, directoryPageId, group.viewColumn, false);
   }
 
   async deserializeWebviewPanel(panel: vscode.WebviewPanel): Promise<void> {
-    if (this.panel && this.panel !== panel) panel.dispose();
-    else this.attach(panel);
+    // 升级时把旧的网页标签换成按 URI 恢复的只读编辑器。
+    const active = panel.active;
+    panel.dispose();
+    if (active) await this.show();
+    else await this.reconcile();
   }
 
-  private attach(panel: vscode.WebviewPanel): void {
-    panel.title = pageTitle;
-    this.panel = panel;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let positioning = false;
-    const activeDirectoryTab = () => {
-      const group = vscode.window.tabGroups.activeTabGroup;
-      const tab = group.activeTab;
-      if (this.panel !== panel || !(tab?.input instanceof vscode.TabInputWebview)) return;
-      const type = tab.input.viewType;
-      if (type === directoryPageId || type === `mainThreadWebview-${directoryPageId}`) return tab;
-    };
-    const pinFirst = async () => {
-      const tab = activeDirectoryTab();
-      if (!tab || positioning || (tab.isPinned && tab.group.tabs[0] === tab)) return;
-      positioning = true;
-      try {
-        if (!tab.isPinned) await vscode.commands.executeCommand('workbench.action.pinEditor');
-        const current = activeDirectoryTab();
-        if (current?.isPinned && current.group.tabs[0] !== current) {
-          await vscode.commands.executeCommand('moveActiveEditor', { by: 'tab', to: 'first' });
-        }
-      } finally {
-        positioning = false;
-      }
-    };
-    const schedule = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => { void pinFirst(); }, 30);
-    };
-    const layout = vscode.Disposable.from(
-      panel.onDidChangeViewState(schedule),
-      vscode.window.tabGroups.onDidChangeTabs(schedule),
-      vscode.window.tabGroups.onDidChangeTabGroups(schedule),
-    );
-    schedule();
-    panel.onDidDispose(() => {
-      clearTimeout(timer);
-      layout.dispose();
-      if (this.panel === panel) this.panel = undefined;
-    });
+  openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
+    if (uri.toString() !== directoryUri.toString()) throw vscode.FileSystemError.FileNotFound(uri);
+    return { uri, dispose() { /* 清单由当前工作区标签生成。 */ } };
+  }
+
+  resolveCustomEditor(_document: vscode.CustomDocument, panel: vscode.WebviewPanel): void {
     const items = new Map<string, OpenedFileTreeNode>();
     const row = (node: OpenedFileTreeNode): FileListRow => {
       if (node.kind === 'file') {
@@ -92,7 +78,4 @@ export class OpenedFilesDirectoryPage implements vscode.WebviewPanelSerializer, 
     });
   }
 
-  dispose(): void {
-    this.panel?.dispose();
-  }
 }
