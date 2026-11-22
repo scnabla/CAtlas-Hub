@@ -1,40 +1,13 @@
-export const DEFAULT_TODO_EXCLUDE_PATTERNS = [
-  '**/.git/**',
-  '**/.svn/**',
-  '**/.hg/**',
-  '**/node_modules/**',
-  '**/bower_components/**',
-  '**/dist/**',
-  '**/out/**',
-  '**/build/**',
-  '**/coverage/**',
-  '**/.vscode-test/**',
-] as const;
+const METADATA_DIRECTORIES = ['.git', '.hg', '.svn'];
+export const TODO_METADATA_GLOBS = METADATA_DIRECTORIES.map(name => `**/${name}/**`);
+
+export function isTodoMetadataPath(relativePath: string): boolean {
+  return relativePath.split('/').slice(0, -1).some(part => METADATA_DIRECTORIES.includes(part.toLowerCase()));
+}
 
 export interface TodoSearchQuery {
   readonly mode: 'fixed' | 'regex';
   readonly patterns: readonly string[];
-}
-
-export function collectTodoExcludePatterns(...configurations: readonly unknown[]): string[] {
-  const patterns = new Set<string>(DEFAULT_TODO_EXCLUDE_PATTERNS);
-  for (const configuration of configurations) {
-    if (!isRecord(configuration)) continue;
-    for (const [rawPattern, value] of Object.entries(configuration)) {
-      if (value !== true) continue;
-      const pattern = normalizePattern(rawPattern);
-      if (pattern.length === 0) continue;
-      patterns.add(pattern);
-      if (!pattern.endsWith('/**')) patterns.add(`${pattern}/**`);
-    }
-  }
-  return [...patterns];
-}
-
-export function createTodoExcludeGlob(...configurations: readonly unknown[]): string {
-  const patterns = collectTodoExcludePatterns(...configurations);
-  if (patterns.length === 1) return patterns[0] ?? '';
-  return `{${patterns.join(',')}}`;
 }
 
 export function createTodoSearchQuery(
@@ -73,14 +46,6 @@ export function parseTodoCandidatePathOutput(output: Buffer): string[] {
   return [...unique];
 }
 
-function normalizePattern(pattern: string): string {
-  return pattern.trim().replaceAll('\\', '/').replace(/^\.\/+/, '').replace(/\/+$/, '');
-}
-
 function escapeExtendedRegExp(value: string): string {
   return value.replace(/[.\\+*?^[\]$(){}|]/g, '\\$&');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

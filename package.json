@@ -182,7 +182,7 @@
       },
       {
         "command": "projectManager.excludeResources",
-        "title": "CAtlas Hub: 屏蔽所选资源（目录、搜索与监控）",
+        "title": "CAtlas Hub: 屏蔽所选资源（目录与搜索）",
         "category": "CAtlas Hub",
         "icon": "$(eye-closed)"
       },

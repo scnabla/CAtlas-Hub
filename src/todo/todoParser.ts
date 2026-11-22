@@ -1,156 +1,53 @@
-/**
- * 纯文本标记解析：依据语言注释规则、关键词和身份选项生成标记，不执行文件访问或刷新视图。
- * 这里不是完整语言语法分析器；新增语法支持需配合 todoCommentSyntax 和解析测试验证字符串、块注释等边界。
- * 输出位置沿用 JavaScript 字符串索引和零起始行号，供 VS Code 跳转与编辑使用；不要改成字节偏移。
- */
 import { TodoMatch, TodoParseOptions } from './todoTypes';
 import { isMyTodoOwner } from './todoOwner';
+import { commentMarkers, markerPattern } from './todoMarkerModel';
+import { TODO_SCAN_MAX_RESULTS } from './todoScanEngine';
 
-export function parseTodoText(text: string, options: TodoParseOptions): TodoMatch[] {
-  const activeTags = options.tags.filter((tag) => tag.enabled);
-  if (activeTags.length === 0) return [];
-  const tagLookup = new Map(activeTags.map((tag) => [tag.name.toLocaleUpperCase(), tag.name]));
-  const tagPattern = [...tagLookup.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|');
-  const markerPattern = new RegExp(`^(${tagPattern})(?:\\s*\\(\\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,31})\\s*\\))?(?:\\s*\\[([ xX])\\])?(?=\\s|:|$)(?:\\s*:)?\\s*(.*)$`, 'i');
-  const lines = text.split(/\r?\n/);
+// 索引跨扫描保留。复制截取的字符串，避免短描述继续引用整个源文件。
+function detached(value: string): string {
+  return Buffer.from(value, 'utf16le').toString('utf16le');
+}
+
+export function* todoMatches(text: string, options: TodoParseOptions, includeCompleted = false): Generator<TodoMatch> {
+  const tags = new Map(options.tags.filter((tag) => tag.enabled).map((tag) => [tag.name.toUpperCase(), tag.name]));
+  if (!tags.size) return;
+  if (options.markdownTasks && options.includeProjectMarkers !== false && tags.has('TODO')) {
+    let line = 0;
+    for (const row of text.matchAll(/([^\r\n]*)(?:\r\n|\n|\r|$)/g)) {
+      const task = /^\s*[-*+]\s+(\[([ xX])\])\s*(.*)$/.exec(row[1]!);
+      if (task && (includeCompleted || task[2] === ' ')) {
+        const startCharacter = row[1]!.indexOf('[');
+        yield { tag: 'TODO', rawTag: 'TODO', text: detached(task[3]!.trim()), line,
+          startCharacter, endCharacter: startCharacter + 3, completed: task[2] !== ' ', source: 'markdownTask' };
+      }
+      line++;
+    }
+  }
+  if (!options.lineCommentTokens.length && !options.blockCommentTokens.length) return;
+  const pattern = markerPattern([...tags.keys()]);
+  for (const { line, lineNumber, marker } of commentMarkers(text, pattern, options.languageId ?? 'cpp', options.lineCommentTokens, options.blockCommentTokens)) {
+    if (marker.completed && !includeCompleted) continue;
+    if (options.includeProjectMarkers === false && !isMyTodoOwner(marker.owner, options.ownerIdentities ?? [])) continue;
+    const tag = tags.get(marker.tag)!;
+    const raw = line.slice(marker.tagStart, marker.tagEnd);
+    yield { tag, rawTag: raw === tag ? tag : detached(raw), text: detached(line.slice(marker.syntaxEnd, marker.descriptionEnd)),
+      ...(marker.owner === undefined ? {} : { owner: detached(marker.owner) }), line: lineNumber,
+      startCharacter: marker.tagStart, endCharacter: marker.tagEnd, completed: marker.completed, source: 'comment' };
+  }
+}
+
+export function parseTodoText(text: string, options: TodoParseOptions, onLimit?: () => void): TodoMatch[] {
   const matches: TodoMatch[] = [];
-  let activeBlock: { readonly close: string } | undefined;
-
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex] ?? '';
-    if (options.markdownTasks && options.includeProjectMarkers !== false && tagLookup.has('TODO')) {
-      const markdown = /^\s*[-*+]\s+\[([ xX])\]\s*(.*)$/.exec(line);
-      if (markdown !== null && markdown[1]?.toLocaleLowerCase() !== 'x') {
-        const markerStart = line.indexOf('[');
-        matches.push({
-          tag: 'TODO', rawTag: 'TODO', text: markdown[2]?.trim() ?? '', line: lineIndex,
-          startCharacter: markerStart, endCharacter: markerStart + 3, completed: false, source: 'markdownTask',
-        });
-      }
-    }
-
-    const bodies: { readonly body: string; readonly offset: number }[] = [];
-    let searchFrom = 0;
-    if (activeBlock !== undefined) {
-      const closeIndex = line.indexOf(activeBlock.close);
-      const end = closeIndex < 0 ? line.length : closeIndex;
-      bodies.push(stripBlockLinePrefix(line.slice(0, end), 0));
-      if (closeIndex < 0) {
-        collectBodies(matches, bodies, lineIndex, markerPattern, tagLookup, options);
-        continue;
-      }
-      activeBlock = undefined;
-      searchFrom = closeIndex + activeBlockLength(options, line, closeIndex);
-    }
-
-    const comment = findCommentStart(line, searchFrom, options);
-    if (comment !== undefined) {
-      if (comment.kind === 'line') {
-        bodies.push({ body: line.slice(comment.index + comment.open.length).trimStart(), offset: comment.index + comment.open.length + leadingWhitespace(line.slice(comment.index + comment.open.length)) });
-      } else {
-        const contentStart = comment.index + comment.open.length;
-        const closeIndex = line.indexOf(comment.close, contentStart);
-        const contentEnd = closeIndex < 0 ? line.length : closeIndex;
-        const rawBody = line.slice(contentStart, contentEnd);
-        bodies.push({ body: rawBody.trimStart(), offset: contentStart + leadingWhitespace(rawBody) });
-        if (closeIndex < 0) activeBlock = { close: comment.close };
-      }
-    }
-    collectBodies(matches, bodies, lineIndex, markerPattern, tagLookup, options);
-  }
-  return matches;
-}
-
-function collectBodies(
-  target: TodoMatch[],
-  bodies: readonly { readonly body: string; readonly offset: number }[],
-  line: number,
-  markerPattern: RegExp,
-  tags: ReadonlyMap<string, string>,
-  options: TodoParseOptions,
-): void {
-  for (const candidate of bodies) {
-    const normalized = stripDecoration(candidate.body, candidate.offset);
-    const result = markerPattern.exec(normalized.body);
-    if (result === null || result[1] === undefined) continue;
-    const rawTag = result[1];
-    const canonical = tags.get(rawTag.toLocaleUpperCase());
-    if (canonical === undefined) continue;
-    const owner = result[2]?.trim();
-    if (options.includeProjectMarkers === false && !isMyTodoOwner(owner, options.ownerIdentities ?? [])) continue;
-    const completed = result[3]?.toLocaleLowerCase() === 'x';
-    if (completed) continue;
-    target.push({
-      tag: canonical,
-      rawTag,
-      ...(owner === undefined ? {} : { owner }),
-      text: result[4]?.trim() ?? '',
-      line,
-      startCharacter: normalized.offset,
-      endCharacter: normalized.offset + rawTag.length,
-      completed,
-      source: 'comment',
-    });
-  }
-}
-
-function findCommentStart(line: string, start: number, options: TodoParseOptions):
-  | { readonly kind: 'line'; readonly index: number; readonly open: string }
-  | { readonly kind: 'block'; readonly index: number; readonly open: string; readonly close: string }
-  | undefined {
-  const candidates: Array<{ kind: 'line' | 'block'; index: number; open: string; close?: string }> = [];
-  for (const token of options.lineCommentTokens) {
-    const index = findOutsideQuotes(line, token, start);
-    if (index >= 0) candidates.push({ kind: 'line', index, open: token });
-  }
-  for (const token of options.blockCommentTokens) {
-    const index = findOutsideQuotes(line, token.open, start);
-    if (index >= 0) candidates.push({ kind: 'block', index, open: token.open, close: token.close });
-  }
-  candidates.sort((a, b) => a.index - b.index);
-  const first = candidates[0];
-  if (first === undefined) return undefined;
-  return first.kind === 'line'
-    ? { kind: 'line', index: first.index, open: first.open }
-    : { kind: 'block', index: first.index, open: first.open, close: first.close ?? '' };
-}
-
-function findOutsideQuotes(line: string, token: string, start: number): number {
-  let quote: string | undefined;
-  let escaped = false;
-  for (let index = start; index <= line.length - token.length; index += 1) {
-    const character = line[index];
-    if (escaped) { escaped = false; continue; }
-    if (character === '\\') { escaped = true; continue; }
-    if (quote !== undefined) {
-      if (character === quote) quote = undefined;
+  let mine = 0, other = 0;
+  for (const match of todoMatches(text, options)) {
+    const personal = isMyTodoOwner(match.owner, options.ownerIdentities ?? []);
+    if ((personal ? mine : other) >= TODO_SCAN_MAX_RESULTS) {
+      onLimit?.();
+      if (options.includeProjectMarkers === false || !options.ownerIdentities?.length || (mine >= TODO_SCAN_MAX_RESULTS && other >= TODO_SCAN_MAX_RESULTS)) break;
       continue;
     }
-    if (character === '"' || character === "'") { quote = character; continue; }
-    if (line.startsWith(token, index)) return index;
+    if (personal) mine++; else other++;
+    matches.push(match);
   }
-  return -1;
-}
-
-function stripBlockLinePrefix(body: string, offset: number): { readonly body: string; readonly offset: number } {
-  const whitespace = leadingWhitespace(body);
-  return { body: body.slice(whitespace), offset: offset + whitespace };
-}
-
-function stripDecoration(body: string, offset: number): { readonly body: string; readonly offset: number } {
-  const match = /^(?:\*\s*)?/.exec(body)?.[0] ?? '';
-  return { body: body.slice(match.length), offset: offset + match.length };
-}
-
-function activeBlockLength(options: TodoParseOptions, line: string, closeIndex: number): number {
-  const close = options.blockCommentTokens.find((token) => line.startsWith(token.close, closeIndex))?.close;
-  return close?.length ?? 0;
-}
-
-function leadingWhitespace(value: string): number {
-  return /^\s*/.exec(value)?.[0].length ?? 0;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return matches;
 }

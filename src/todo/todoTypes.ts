@@ -29,6 +29,7 @@ export interface TodoResourceResult {
 }
 
 export interface TodoParseOptions {
+  readonly languageId?: string;
   readonly tags: readonly TodoTagDefinition[];
   readonly markdownTasks: boolean;
   readonly lineCommentTokens: readonly string[];

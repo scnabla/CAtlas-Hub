@@ -6,11 +6,11 @@ import { getPersonalConfiguration } from '../configuration/personalConfiguration
  * 文件大小、候选数量、结果数和并发限制分别控制不同开销；个人标记扫描也不能取消这些保护。
  */
 import * as vscode from 'vscode';
-import { escapeGlobPath } from '../exclusions/exclusionPatterns';
 import { TodoIndex } from './todoIndex';
 import { LocalTodoCandidateSearch } from './todoLocalSearch';
 import { parseTodoText } from './todoParser';
-import { collectTodoExcludePatterns, createTodoExcludeGlob, createTodoSearchQuery, normalizeTodoCandidatePath } from './todoScanPlan';
+import { TODO_SOURCE_GLOB } from './todoCommentSyntax';
+import { TODO_METADATA_GLOBS, isTodoMetadataPath, createTodoSearchQuery, normalizeTodoCandidatePath } from './todoScanPlan';
 import { combineTodoScanBackends, TodoCandidateSearch, TodoScanBackend } from './todoSearchBackend';
 import { createTodoParseOptions, createTodoParseOptionsForPath, getTodoSettings } from './todoSettings';
 import { runTodoScanEngine, TODO_SCAN_CONCURRENCY, TODO_SCAN_MAX_RESULTS, TodoScanEngineProgress } from './todoScanEngine';
@@ -19,7 +19,7 @@ import { TodoMatch } from './todoTypes';
 import { collectTodoInventory, todoCacheSignature, TodoInventory } from './todoCacheInventory';
 import { decodeTodoCache, encodeTodoCache, sameTodoFileStamp, TODO_CACHE_KEY, TODO_CACHE_MAX_AGE, TODO_CACHE_MAX_FILES, TodoCachedFile, TodoDiskCache } from './todoPersistentCache';
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+import { MAX_TODO_FILE_BYTES as MAX_FILE_BYTES, todoDocumentText } from './todoDocumentText';
 const PROGRESS_INTERVAL_MS = 150;
 const MAX_DISCOVERED_FILES = 50_000;
 
@@ -86,6 +86,7 @@ export class TodoScanner {
     }
     // 跨启动修订号归零；此前已收到的实时编辑保持优先，不能直接 restore 清空它们。
     this.index.reconcile(restored.snapshot(), 0);
+    this.index.limitResults(settings.ownerIdentities);
     return true;
   }
 
@@ -108,7 +109,7 @@ export class TodoScanner {
     const invalidated = new Set(this.invalidatedFiles);
     this.invalidatedFiles.clear();
     const settings = getTodoSettings();
-    this.seedOpenDocuments(settings);
+    const openUris = this.seedOpenDocuments(settings, revision, token);
     const base = { files: 0, candidateFiles: 0, discoveredFiles: 0, skippedFiles: 0,
       results: this.countResults(), truncated: false, cancelled: false, backend: 'vscode' as const,
       updateKind: 'incremental' as const };
@@ -131,45 +132,53 @@ export class TodoScanner {
     let limited = false;
     let incomplete = false;
     let lastProgress = 0;
+    const openDocuments = this.openTabbedDocuments();
+    const candidates = [...new Set([...openUris.map(uri => uri.toString()), ...inventory.stamps.keys()])];
     const progress = await runTodoScanEngine({
-      items: [...inventory.stamps.entries()], concurrency: 8, maxResults: TODO_SCAN_MAX_RESULTS * 2,
+      items: candidates, concurrency: 8, maxResults: TODO_SCAN_MAX_RESULTS * 2,
       isCancelled: () => token.isCancellationRequested,
-      load: async ([key, stamp]) => {
+      load: async (key) => {
+        const stamp = inventory.stamps.get(key);
         const uri = vscode.Uri.parse(key);
-        const document = vscode.workspace.textDocuments.find((doc) => doc.uri.toString() === key && !doc.isClosed);
+        const document = openDocuments.get(key);
+        if (!document && !stamp) return [];
         const old = previous.get(key);
         let matches: readonly TodoMatch[];
         // size 随缓存保存：这是按策略跳过，不是假定文件没有标记；缩小后会走正常读取。
-        if (!document && stamp.size > MAX_FILE_BYTES) {
+        const liveText = document && todoDocumentText(document);
+        if (document ? liveText === undefined : stamp && stamp.size > MAX_FILE_BYTES) {
           oversizedFiles += 1;
-          next.set(key, { uri: key, ...stamp, matches: [] });
+          if (stamp && !document) next.set(key, { uri: key, ...stamp, matches: [] });
           this.reportOversized(uri);
           if (oversizedFiles % 64 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
           return [];
-        } else if (!document && old && !invalidated.has(key) && !this.invalidatedFiles.has(key) && sameTodoFileStamp(old, stamp)) {
+        } else if (!document && stamp && old && !invalidated.has(key) && !this.invalidatedFiles.has(key) && sameTodoFileStamp(old, stamp)) {
           matches = old.matches; reusedFiles += 1;
           next.set(key, old);
         } else {
           const options = document ? createTodoParseOptions(document.languageId, settings) : createTodoParseOptionsForPath(uri.path, settings);
-          const text = document?.getText() ?? await this.readText(uri);
+          const text = document ? liveText : await this.readText(uri);
           readFiles += 1;
           if (text === undefined || !options) { incomplete = true; return undefined; }
-          matches = parseTodoText(text, options);
-          if (!document) {
+          matches = parseTodoText(text, options, () => { limited = true; });
+          if (!document && stamp) {
             const after = await this.filesApi.stat(uri);
             if (sameTodoFileStamp(stamp, after)) next.set(key, { uri: key, ...stamp, matches });
             else incomplete = true;
           }
         }
         if ((reusedFiles + readFiles) % 64 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
-        return matches.filter((match) => {
+        const accepted = matches.filter((match) => {
           const mine = isMyTodoOwner(match.owner, settings.ownerIdentities);
           if ((mine ? personal : project) >= TODO_SCAN_MAX_RESULTS) { limited = true; return false; }
           if (mine) personal += 1; else project += 1;
           return true;
         });
+        const cached = next.get(key);
+        if (cached && accepted.length !== matches.length) next.set(key, { ...cached, matches: accepted });
+        return accepted;
       },
-      commit: ([key], matches) => {
+      commit: (key, matches) => {
         const uri = vscode.Uri.parse(key);
         staging.replace(key, matches, revision, vscode.workspace.asRelativePath(uri, false),
           vscode.workspace.getWorkspaceFolder(uri)?.uri.toString());
@@ -178,20 +187,21 @@ export class TodoScanner {
       onProgress: (p) => {
         if (Date.now() - lastProgress < PROGRESS_INTERVAL_MS) return;
         lastProgress = Date.now();
-        onProgress?.({ ...base, ...p, candidateFiles: inventory.stamps.size, discoveredFiles: inventory.stamps.size,
+        onProgress?.({ ...base, ...p, candidateFiles: candidates.length, discoveredFiles: candidates.length,
           files: Math.max(0, p.files - oversizedFiles), skippedFiles: p.skippedFiles + oversizedFiles,
           phase: 'scanning', reusedFiles, readFiles, oversizedFiles });
       },
     });
     const cancelled = token.isCancellationRequested || progress.cancelled;
-    const stale = incomplete || limited || progress.truncated || cancelled || cache.signature !== todoCacheSignature();
+    const stale = incomplete || cancelled || cache.signature !== todoCacheSignature();
     if (!stale) {
       this.index.reconcile(staging.snapshot(), revision);
-      await this.saveCache({ ...cache, savedAt: Date.now(), files: [...next.values()] }, token);
+      limited = this.index.limitResults(settings.ownerIdentities) || limited;
+      if (!limited && !progress.truncated) await this.saveCache({ ...cache, savedAt: Date.now(), files: [...next.values()] }, token);
     }
     return { ...base, ...progress, phase: incomplete ? 'failed' : 'complete',
       files: Math.max(0, progress.files - oversizedFiles), skippedFiles: progress.skippedFiles + oversizedFiles, oversizedFiles,
-      candidateFiles: inventory.stamps.size, discoveredFiles: inventory.stamps.size,
+      candidateFiles: candidates.length, discoveredFiles: candidates.length,
       results: this.countResults(), cancelled, stale, reusedFiles, readFiles,
       truncated: limited || progress.truncated,
       ...(limited || progress.truncated ? { limit: 'results' as const } : {}),
@@ -237,13 +247,17 @@ export class TodoScanner {
     const options = createTodoParseOptions(document.languageId, settings);
     if (options === undefined) return this.index.removeAtRevision(document.uri.toString(), revision);
     const workspace = vscode.workspace.getWorkspaceFolder(document.uri);
-    return this.index.replace(
+    const text = todoDocumentText(document);
+    if (text === undefined) return this.index.removeAtRevision(document.uri.toString(), revision);
+    const changed = this.index.replace(
       document.uri.toString(),
-      parseTodoText(document.getText(), options),
+      parseTodoText(text, options),
       revision,
       workspace === undefined ? document.uri.path.split('/').pop() ?? document.uri.toString() : vscode.workspace.asRelativePath(document.uri, false),
       workspace?.uri.toString(),
     );
+    this.index.limitResults(settings.ownerIdentities);
+    return changed;
   }
 
   public async scanCurrentFile(token: vscode.CancellationToken): Promise<TodoScanSummary> {
@@ -258,10 +272,13 @@ export class TodoScanner {
     }
     const staging = new TodoIndex();
     const options = createTodoParseOptions(document.languageId);
-    if (options !== undefined) {
+    const text = options && todoDocumentText(document);
+    const oversized = !!options && text === undefined;
+    let truncated = false;
+    if (options && text !== undefined) {
       const workspace = vscode.workspace.getWorkspaceFolder(document.uri);
       staging.replace(
-        document.uri.toString(), parseTodoText(document.getText(), options), scanRevision,
+        document.uri.toString(), parseTodoText(text, options, () => { truncated = true; }), scanRevision,
         workspace === undefined
           ? document.uri.path.split('/').pop() ?? document.uri.toString()
           : vscode.workspace.asRelativePath(document.uri, false),
@@ -270,41 +287,47 @@ export class TodoScanner {
     }
     if (!token.isCancellationRequested) this.index.reconcile(staging.snapshot(), scanRevision);
     return {
-      files: 1,
+      files: oversized ? 0 : 1,
       candidateFiles: 1,
       discoveredFiles: 1,
-      skippedFiles: 0,
+      skippedFiles: Number(oversized),
+      oversizedFiles: Number(oversized),
       results: token.isCancellationRequested ? this.countResults() : this.index.get(document.uri.toString())?.matches.length ?? 0,
-      truncated: false,
+      truncated,
+      ...(truncated ? { limit: 'results' as const } : {}),
       cancelled: token.isCancellationRequested,
       phase: 'complete',
       backend: 'currentFile',
     };
   }
 
-  public async scanUri(uri: vscode.Uri): Promise<boolean> {
+  public async scanUri(uri: vscode.Uri, live?: vscode.TextDocument, stillRelevant = () => true): Promise<boolean> {
     this.invalidateUri(uri);
     const scanRevision = ++this.revision;
     const settings = getTodoSettings();
     const workspace = vscode.workspace.getWorkspaceFolder(uri);
-    const openDocument = this.isOpenTextDocumentUri(uri)
+    const openDocument = live ?? (this.isOpenTextDocumentUri(uri)
       ? vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())
-      : undefined;
-    if (openDocument === undefined && workspace !== undefined && !(await this.isIncludedWorkspaceUri(uri, workspace))) {
-      return this.index.removeAtRevision(uri.toString(), scanRevision);
+      : undefined);
+    if (!openDocument && workspace !== undefined && isTodoMetadataPath(vscode.workspace.asRelativePath(uri, false))) {
+      return stillRelevant() && this.index.removeAtRevision(uri.toString(), scanRevision);
     }
+    if (!stillRelevant()) return false;
     const options = openDocument === undefined
       ? createTodoParseOptionsForPath(uri.path, settings)
       : createTodoParseOptions(openDocument.languageId, settings);
     if (!settings.enabled || options === undefined) return this.index.removeAtRevision(uri.toString(), scanRevision);
     try {
-      const text = openDocument?.getText() ?? await this.readText(uri);
-      if (text === undefined) return false;
-      return this.index.replace(
+      if (openDocument) return this.replaceDocument(openDocument, settings, scanRevision);
+      const text = await this.readText(uri);
+      if (text === undefined) return this.index.removeAtRevision(uri.toString(), scanRevision);
+      const changed = this.index.replace(
         uri.toString(), parseTodoText(text, options), scanRevision,
         workspace === undefined ? uri.path.split('/').pop() ?? uri.toString() : vscode.workspace.asRelativePath(uri, false),
         workspace?.uri.toString(),
       );
+      this.index.limitResults(settings.ownerIdentities);
+      return changed;
     } catch (error) {
       this.output.appendLine(`TODO 增量扫描跳过 ${uri.path.split('/').pop() ?? '未知文件'}：${error instanceof Error ? error.name : '读取失败'}`);
       return false;
@@ -332,7 +355,7 @@ export class TodoScanner {
         truncated: false, cancelled: token.isCancellationRequested, phase: 'complete', backend: 'vscode',
       };
     }
-    const seededUris = this.seedOpenDocuments(settings);
+    const seededUris = this.seedOpenDocuments(settings, scanRevision, token);
     if (seededUris.length > 0) {
       onProgress?.({
         files: seededUris.length,
@@ -360,9 +383,10 @@ export class TodoScanner {
     } catch (error) {
       return this.failedScan(error, 'vscode');
     }
-    const uris = discovery.uris;
+    const candidates = new Map([...seededUris, ...discovery.uris].map(uri => [uri.toString(), uri]));
+    const uris = [...candidates.values()];
     let lastProgressAt = 0;
-    const openDocuments = new Map(vscode.workspace.textDocuments.map((document) => [document.uri.toString(), document]));
+    const openDocuments = this.openTabbedDocuments();
     const staging = new TodoIndex();
     const diskFiles = new Map<string, TodoCachedFile>();
     for (const [uri, stamp] of inventory?.stamps ?? []) diskFiles.set(uri, { uri, ...stamp, matches: [] });
@@ -400,7 +424,7 @@ export class TodoScanner {
     const summary = (progress: TodoScanEngineProgress, phase: TodoScanSummary['phase'] = 'scanning'): TodoScanSummary => ({
       files: Math.max(0, progress.files - processedOversized),
       candidateFiles: uris.length,
-      discoveredFiles: discovery.discoveredFiles,
+      discoveredFiles: Math.max(discovery.discoveredFiles, uris.length),
       skippedFiles: progress.skippedFiles + processedOversized,
       oversizedFiles: oversized.size,
       results: progress.results,
@@ -442,16 +466,22 @@ export class TodoScanner {
             }
             oversized.delete(uri.toString());
           }
-          const text = openDocument?.getText() ?? await this.readText(uri);
+          const text = openDocument ? todoDocumentText(openDocument) : await this.readText(uri);
+          if (openDocument && text === undefined) {
+            oversized.add(uri.toString());
+            processedOversized++;
+            this.reportOversized(uri);
+            return [];
+          }
           if (text === undefined) { cacheComplete = false; return undefined; }
-          const matches = parseTodoText(text, options);
+          const matches = acceptMatches(parseTodoText(text, options, () => { personalTruncated = true; }));
           const before = inventory?.stamps.get(uri.toString());
           if (before && !openDocument) {
             const after = await this.filesApi.stat(uri);
             if (sameTodoFileStamp(before, after)) diskFiles.set(uri.toString(), { uri: uri.toString(), ...before, matches });
             else cacheComplete = false;
           }
-          return acceptMatches(matches);
+          return matches;
         },
         commit: (uri, matches) => {
           const workspace = vscode.workspace.getWorkspaceFolder(uri);
@@ -472,7 +502,7 @@ export class TodoScanner {
       return this.failedScan(error, discovery.backend, {
         files: 0,
         candidateFiles: uris.length,
-        discoveredFiles: discovery.discoveredFiles,
+        discoveredFiles: Math.max(discovery.discoveredFiles, uris.length),
         skippedFiles: 0,
       });
     }
@@ -480,6 +510,7 @@ export class TodoScanner {
       // 不逐项覆盖正式索引：一次合并完整扫描，并由修订号保留扫描期间的实时修改和删除。
       // 这是防止“扫描中有标记，扫描完成后消失”的关键；取消的临时结果不能在这里提交。
       this.index.reconcile(staging.snapshot(), scanRevision);
+      personalTruncated = this.index.limitResults(settings.ownerIdentities) || personalTruncated;
       if (cacheComplete && !scanProgress.truncated && !personalTruncated && !projectTruncated) {
         const now = Date.now();
         await this.saveCache({ version: 1, signature, savedAt: now, fullAt: now, files: [...diskFiles.values()] }, token);
@@ -500,35 +531,34 @@ export class TodoScanner {
   ): Promise<TodoCandidateDiscovery> {
     const roots = vscode.workspace.workspaceFolders ?? [];
     const groups = await Promise.all(roots.map(async (folder) => {
-      const excludePatterns = this.collectExcludePatterns(folder);
-      const exclude = createTodoExcludeGlob(...this.excludeConfigurations(folder));
       const query = createTodoSearchQuery(
         settings.tagNames, settings.markdownTasks, settings.ownerIdentities, settings.showProjectMarkers,
       );
       const personalQuery = createTodoSearchQuery(settings.tagNames, false, settings.ownerIdentities, false);
       const [fastResult, personalResult] = await Promise.all([
-        this.candidateSearch.search(folder, query, excludePatterns, token),
+        this.candidateSearch.search(folder, query, TODO_METADATA_GLOBS, token),
         settings.showProjectMarkers && personalQuery.patterns.length > 0
-          ? this.candidateSearch.search(folder, personalQuery, excludePatterns, token)
+          ? this.candidateSearch.search(folder, personalQuery, TODO_METADATA_GLOBS, token)
           : Promise.resolve(undefined),
       ]);
       if (fastResult === undefined) {
         const discovered = await vscode.workspace.findFiles(
-          new vscode.RelativePattern(folder, '**/*'),
-          new vscode.RelativePattern(folder, exclude),
+          new vscode.RelativePattern(folder, TODO_SOURCE_GLOB),
+          null,
           MAX_DISCOVERED_FILES,
           token,
         );
         if (discovered.length >= MAX_DISCOVERED_FILES) {
           this.output.appendLine(`TODO 兼容扫描已限制为前 ${MAX_DISCOVERED_FILES} 个文件，请安装 Git 或 ripgrep 以使用快速搜索。`);
         }
-        const supported = discovered.filter((uri) => createTodoParseOptionsForPath(uri.path, settings) !== undefined);
+        const supported = discovered.filter((uri) => !isTodoMetadataPath(vscode.workspace.asRelativePath(uri, false))
+          && createTodoParseOptionsForPath(uri.path, settings) !== undefined);
         return { uris: supported, discoveredFiles: supported.length, backend: 'vscode' as const };
       }
       const selected = new Map<string, vscode.Uri>();
       const addCandidate = (relativePath: string): void => {
         const normalized = normalizeTodoCandidatePath(relativePath);
-        if (normalized === undefined) return;
+        if (normalized === undefined || isTodoMetadataPath(normalized)) return;
         const uri = vscode.Uri.joinPath(folder.uri, ...normalized.split('/'));
         if (selected.size >= MAX_DISCOVERED_FILES && !selected.has(uri.toString())) return;
         if (createTodoParseOptionsForPath(uri.path, settings) !== undefined) selected.set(uri.toString(), uri);
@@ -537,11 +567,6 @@ export class TodoScanner {
       for (const path of fastResult.relativePaths) addCandidate(path);
       if ((personalResult?.relativePaths.length ?? 0) + fastResult.relativePaths.length > MAX_DISCOVERED_FILES) {
         this.output.appendLine(`TODO 快速搜索候选已限制为前 ${MAX_DISCOVERED_FILES} 个文件。`);
-      }
-      for (const document of vscode.workspace.textDocuments) {
-        if (vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString() !== folder.uri.toString()) continue;
-        if (createTodoParseOptions(document.languageId, settings) === undefined) continue;
-        if (await this.isIncludedWorkspaceUri(document.uri, folder)) selected.set(document.uri.toString(), document.uri);
       }
       return { uris: [...selected.values()], discoveredFiles: selected.size, backend: fastResult.backend };
     }));
@@ -555,43 +580,25 @@ export class TodoScanner {
     };
   }
 
-  private async isIncludedWorkspaceUri(uri: vscode.Uri, folder: vscode.WorkspaceFolder): Promise<boolean> {
-    if (createTodoParseOptionsForPath(uri.path) === undefined) return false;
-    const relativePath = vscode.workspace.asRelativePath(uri, false);
-    const matches = await vscode.workspace.findFiles(
-      new vscode.RelativePattern(folder, escapeGlobPath(relativePath)),
-      new vscode.RelativePattern(folder, this.createExcludePattern(folder)),
-      1,
-    );
-    return matches.some((candidate) => candidate.toString() === uri.toString());
-  }
-
-  private createExcludePattern(folder: vscode.WorkspaceFolder): string {
-    return createTodoExcludeGlob(...this.excludeConfigurations(folder));
-  }
-
-  private excludeConfigurations(folder: vscode.WorkspaceFolder): readonly unknown[] {
-    return [
-      getPersonalConfiguration('files', folder.uri).get<unknown>('exclude'),
-      getPersonalConfiguration('search', folder.uri).get<unknown>('exclude'),
-    ];
-  }
-
-  private collectExcludePatterns(folder: vscode.WorkspaceFolder): string[] {
-    return collectTodoExcludePatterns(...this.excludeConfigurations(folder));
-  }
-
-  private seedOpenDocuments(settings: ReturnType<typeof getTodoSettings>): vscode.Uri[] {
+  private seedOpenDocuments(settings: ReturnType<typeof getTodoSettings>, revision: number, token: vscode.CancellationToken): vscode.Uri[] {
     const uris: vscode.Uri[] = [];
     for (const document of vscode.workspace.textDocuments) {
       if (!this.isOpenTextDocumentUri(document.uri)) continue;
       const workspace = vscode.workspace.getWorkspaceFolder(document.uri);
       const options = createTodoParseOptions(document.languageId, settings);
       if (workspace === undefined || options === undefined) continue;
-      this.replaceDocument(document, settings, ++this.revision);
+      if (token.isCancellationRequested) break;
+      this.replaceDocument(document, settings, revision);
       uris.push(document.uri);
     }
     return uris;
+  }
+
+  private openTabbedDocuments(): Map<string, vscode.TextDocument> {
+    const open = new Set(vscode.window.tabGroups.all.flatMap(group => group.tabs
+      .flatMap(tab => tab.input instanceof vscode.TabInputText ? [tab.input.uri.toString()] : [])));
+    return new Map(vscode.workspace.textDocuments.filter(doc => open.has(doc.uri.toString()) && !doc.isClosed)
+      .map(doc => [doc.uri.toString(), doc]));
   }
 
   private isOpenTextDocumentUri(uri: vscode.Uri): boolean {
@@ -603,7 +610,7 @@ export class TodoScanner {
   }
 
   private countResults(): number {
-    return this.index.values().reduce((sum, entry) => sum + entry.matches.length, 0);
+    return this.index.total;
   }
 
   private failedScan(
@@ -637,6 +644,7 @@ export class TodoScanner {
     const stat = await this.filesApi.stat(uri);
     if (stat.type !== vscode.FileType.File || stat.size > MAX_FILE_BYTES) return undefined;
     const bytes = await this.filesApi.readFile(uri);
+    if (bytes.byteLength > MAX_FILE_BYTES) return undefined;
     const configuredEncoding = getPersonalConfiguration('files', uri).get<string>('encoding', 'utf8');
     const decoded = decodeTodoText(bytes, configuredEncoding, vscode.env.language);
     if (decoded === undefined) return undefined;

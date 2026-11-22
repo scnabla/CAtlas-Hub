@@ -60,6 +60,10 @@ export const TODO_SEARCH_GLOBS = [
   '**/Makefile',
 ] as const;
 
+// findFiles 的包含模式区分大小写；扩展名识别同时支持 .c、.C 等写法。
+export const TODO_SOURCE_GLOB = '{' + TODO_SEARCH_GLOBS.map(glob =>
+  glob.replace(/[a-z]/gi, letter => '[' + letter.toLowerCase() + letter.toUpperCase() + ']')).join(',') + '}';
+
 export function getTodoCommentSyntax(languageId: string): TodoCommentSyntax | undefined {
   return LANGUAGE_SYNTAX[languageId];
 }

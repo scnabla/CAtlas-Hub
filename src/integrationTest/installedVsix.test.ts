@@ -432,4 +432,124 @@ suite('已安装 VSIX', () => {
     }
   });
 
+  test('INT-252 修改块注释保留源码，过期条目重定位到原任务', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const config = vscode.workspace.getConfiguration('projectManager.todo');
+    const original = config.inspect('showProjectMarkers')?.workspaceValue;
+    const root = vscode.workspace.workspaceFolders![0]!.uri;
+    const uri = vscode.Uri.joinPath(root, 'todo-edit-' + Date.now() + '.cpp');
+    const scope = api.todo.provider.scope;
+    const state = api.context.workspaceState;
+    const key = 'projectManager.todo.lastTag';
+    const last = state.get(key);
+    const marker = api.todo.marker as unknown as { requestDescription: () => Promise<string>; quickMark(repeat: boolean): Promise<boolean> };
+    const request = marker.requestDescription;
+    const ownerConfig = config.inspect('owner')?.workspaceValue;
+    try {
+      await config.update('owner', 'dev', vscode.ConfigurationTarget.Workspace);
+      await config.update('showProjectMarkers', true, vscode.ConfigurationTarget.Workspace);
+      await state.update(key, 'TODO');
+      await vscode.workspace.fs.writeFile(uri, Buffer.from('/* TODO(dev): old */ int value = 1;\nconst char *s = "// TODO: literal"; // TODO(dev): real\n'));
+      const editor = await vscode.window.showTextDocument(uri, { preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      editor.selection = new vscode.Selection(0, 0, 0, 0);
+      marker.requestDescription = async () => 'new';
+      assert.equal(await marker.quickMark(true), true);
+      assert.equal(editor.document.lineAt(0).text, '/* TODO(dev): new */ int value = 1;');
+      api.todo.provider.scope = 'currentFile';
+      await api.todo.refresh(true);
+      const resource = api.todo.index.get(uri.toString());
+      const match = resource?.matches.find(m => m.text === 'real');
+      assert.ok(resource && match);
+      const node = { kind: 'result', resource, match, grouping: 'category' };
+      await editor.edit(e => e.insert(new vscode.Position(0, 0), '// header\n'));
+      assert.equal(await vscode.commands.executeCommand('projectManager.todo.toggleCompleted', node), true);
+      assert.equal(editor.document.lineAt(2).text, 'const char *s = "// TODO: literal"; // TODO(dev) [x]: real');
+      assert.equal(editor.document.lineAt(1).text, '/* TODO(dev): new */ int value = 1;');
+      await editor.edit(e => e.insert(new vscode.Position(0, 0), '// TODO(dev): real\n'));
+      assert.equal(await vscode.commands.executeCommand('projectManager.todo.removeMark', node), false);
+    } finally {
+      marker.requestDescription = request;
+      api.todo.provider.scope = scope;
+      await state.update(key, last);
+      await config.update('showProjectMarkers', original, vscode.ConfigurationTarget.Workspace);
+      await config.update('owner', ownerConfig, vscode.ConfigurationTarget.Workspace);
+      const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === uri.toString());
+      if (doc?.isDirty) await doc.save();
+      await vscode.workspace.fs.delete(uri);
+    }
+  });
+
+  test('INT-253 文件夹、单文件和同类型文件屏蔽均不影响 TODO 索引', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const root = vscode.workspace.workspaceFolders![0]!.uri;
+    const name = '.todo-hidden-' + Date.now();
+    const directory = vscode.Uri.joinPath(root, name);
+    const nested = vscode.Uri.joinPath(directory, 'build', 'nested');
+    const file = vscode.Uri.joinPath(nested, 'driver.c');
+    const extra = vscode.Uri.joinPath(nested, 'second.c');
+    const settings = [
+      { section: 'files', key: 'exclude', patterns: [name, name + '/build/nested/driver.c'] },
+      { section: 'search', key: 'exclude', patterns: [name + '/**', '**/*.c'] },
+      { section: 'files', key: 'watcherExclude', patterns: [name + '/**'] },
+    ].map(entry => ({ ...entry, config: vscode.workspace.getConfiguration(entry.section, root),
+      original: vscode.workspace.getConfiguration(entry.section, root).inspect<Record<string, boolean>>(entry.key)?.workspaceValue }));
+    const confirmation = vscode.workspace.getConfiguration('projectManager.exclusions', root);
+    const previousConfirmation = confirmation.inspect<boolean>('confirmBeforeApply')?.workspaceValue;
+    const todo = vscode.workspace.getConfiguration('projectManager.todo', root);
+    const show = todo.inspect<boolean>('showProjectMarkers')?.workspaceValue;
+    const scope = api.todo.provider.scope;
+    const matches = (uri: vscode.Uri) => api.todo.index.get(uri.toString())?.matches.map(m => m.text) ?? [];
+    try {
+      await vscode.workspace.fs.createDirectory(nested);
+      await vscode.workspace.fs.writeFile(file, Buffer.from('// TODO: disk'));
+      await confirmation.update('confirmBeforeApply', false, vscode.ConfigurationTarget.Workspace);
+      const files = vscode.workspace.getConfiguration('files', root);
+      const watchBefore = files.get('watcherExclude');
+      assert.equal((await api.exclusions.exclude([directory])).resourceCount, 1);
+      assert.equal((await api.exclusions.excludeFileTypes([file])).typeCount, 1);
+      assert.equal(vscode.workspace.getConfiguration('files', root).get<Record<string, boolean>>('watcherExclude')?.[name + '/**'], undefined);
+      assert.deepEqual(vscode.workspace.getConfiguration('files', root).get('watcherExclude'), watchBefore);
+      await todo.update('showProjectMarkers', true, vscode.ConfigurationTarget.Workspace);
+      api.todo.provider.scope = 'workspace';
+      await api.todo.refresh(true);
+      assert.deepEqual(matches(file), ['disk']);
+      await fs.writeFile(file.fsPath, '// TODO: external edit');
+      for (let i = 0; i < 100 && matches(file)[0] !== 'external edit'; i++) {
+        await new Promise(resolve => setTimeout(resolve, 80));
+      }
+      assert.deepEqual(matches(file), ['external edit'], '新屏蔽规则下应能收到已关闭文件的磁盘修改');
+      for (const rule of settings) {
+        const hidden = Object.fromEntries(rule.patterns.map(pattern => [pattern, true]));
+        await rule.config.update(rule.key, { ...rule.original, ...hidden }, vscode.ConfigurationTarget.Workspace);
+      }
+      await api.todo.refresh(true);
+      assert.deepEqual(matches(file), ['external edit']);
+      const editor = await vscode.window.showTextDocument(file, { preview: false });
+      await editor.edit(edit => edit.insert(new vscode.Position(0, 0), '// FIXME: unsaved\n'));
+      await api.todo.refresh(true);
+      assert.deepEqual(matches(file), ['unsaved', 'external edit']);
+      assert.equal(await editor.document.save(), true);
+      const tab = vscode.window.tabGroups.all.flatMap(g => g.tabs).find(t => t.input instanceof vscode.TabInputText && t.input.uri.toString() === file.toString());
+      assert.ok(tab);
+      await vscode.window.tabGroups.close(tab);
+      await api.todo.waitForIdleForIntegrationTest();
+      assert.deepEqual(matches(file), ['unsaved', 'external edit']);
+      await vscode.workspace.fs.writeFile(file, Buffer.from('// TODO: changed'));
+      await vscode.workspace.fs.writeFile(extra, Buffer.from('// FIXME: added'));
+      await api.todo.refresh(false);
+      assert.deepEqual(matches(file), ['changed']);
+      assert.deepEqual(matches(extra), ['added']);
+      await vscode.workspace.fs.delete(extra);
+      await api.todo.refresh(false);
+      assert.deepEqual(matches(extra), []);
+    } finally {
+      api.todo.provider.scope = scope;
+      await confirmation.update('confirmBeforeApply', previousConfirmation, vscode.ConfigurationTarget.Workspace);
+      await todo.update('showProjectMarkers', show, vscode.ConfigurationTarget.Workspace);
+      for (const rule of settings) await rule.config.update(rule.key, rule.original, vscode.ConfigurationTarget.Workspace);
+      await vscode.workspace.fs.delete(directory, { recursive: true });
+    }
+  });
+
 });

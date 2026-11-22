@@ -3,13 +3,15 @@ import { describe, it } from 'node:test';
 import { getTodoCommentSyntax, getTodoInsertionToken, inferTodoLanguageId } from '../todo/todoCommentSyntax';
 import { collectSelectableTodoDescriptions, EMPTY_TODO_DESCRIPTION, formatTodoDescription, normalizeTodoDescription, todoDescriptionGroupKey, todoDescriptionInputValue } from '../todo/todoDescription';
 import { formatTodoFreshness, todoUpdateAgeDays } from '../todo/todoFreshness';
+import type { TextDocument } from 'vscode';
+import { MAX_TODO_FILE_BYTES, todoDocumentText } from '../todo/todoDocumentText';
 import { TodoIndex } from '../todo/todoIndex';
 import { findMarker } from '../todo/todoMarkerModel';
 import { isMyTodoOwner, normalizeTodoOwner, normalizeTodoOwners } from '../todo/todoOwner';
 import { parseTodoText } from '../todo/todoParser';
 import {
-  collectTodoExcludePatterns, createTodoExcludeGlob, createTodoSearchQuery,
-  DEFAULT_TODO_EXCLUDE_PATTERNS, normalizeTodoCandidatePath, parseTodoCandidatePathOutput,
+  isTodoMetadataPath, createTodoSearchQuery,
+  normalizeTodoCandidatePath, parseTodoCandidatePathOutput,
 } from '../todo/todoScanPlan';
 import { combineTodoScanBackends, todoScanBackendLabel } from '../todo/todoSearchBackend';
 import { runTodoScanEngine } from '../todo/todoScanEngine';
@@ -268,30 +270,18 @@ describe('代码 TODO 个人标识与目录模型', () => {
 });
 
 describe('代码 TODO 扫描计划', () => {
-  it('合并默认目录、files.exclude、search.exclude 和插件写入的规则', () => {
-    const patterns = collectTodoExcludePatterns(
-      { documentation: true, '**/*.log': false },
-      { examples: true, generated: true },
-    );
-    for (const pattern of DEFAULT_TODO_EXCLUDE_PATTERNS) assert.ok(patterns.includes(pattern));
-    assert.ok(patterns.includes('documentation'));
-    assert.ok(patterns.includes('documentation/**'));
-    assert.ok(patterns.includes('examples/**'));
-    assert.ok(patterns.includes('generated/**'));
-    assert.equal(patterns.includes('**/*.log'), false);
+  it('屏蔽目录中和依赖目录中的源码仍属于工作区源文件', () => {
+    for (const path of ['docs/index.md', 'sdk/generated/main.cpp', '.vendor/lib.rs', 'lib/shared/driver.c', 'build/stubs.c', 'node_modules/lib/index.ts']) {
+      assert.equal(isTodoMetadataPath(path), false, path);
+    }
   });
 
-  it('条件式 files.exclude 不被错误扩展为无条件排除', () => {
-    const patterns = collectTodoExcludePatterns({ '**/*.js': { when: '$(basename).ts' }, '**/*.map': true });
-    assert.equal(patterns.includes('**/*.js'), false);
-    assert.ok(patterns.includes('**/*.map'));
+  it('目录名必须完整匹配版本控制元数据目录', () => {
+    for (const path of ['.github/script.js', 'project.hg/driver.c', '.gitignore']) assert.equal(isTodoMetadataPath(path), false);
   });
 
-  it('生成可直接交给 VS Code findFiles 的单一排除 Glob', () => {
-    const glob = createTodoExcludeGlob({ documentation: true }, { examples: true });
-    assert.match(glob, /^\{.*\}$/);
-    assert.match(glob, /documentation\/\*\*/);
-    assert.match(glob, /examples\/\*\*/);
+  it('跳过版本控制元数据目录', () => {
+    for (const path of ['.git/test.c', 'lib/.svn/db.c', 'sub/.hg/store/note.md']) assert.ok(isTodoMetadataPath(path), path);
   });
 
   it('分别生成项目固定字符串查询和个人负责人正则查询', () => {
@@ -401,5 +391,59 @@ describe('代码 TODO 后台更新队列与更新时间', () => {
     assert.equal(formatTodoFreshness(now - 3 * 60 * 60_000, now), '上次完整更新 3 小时前');
     assert.equal(formatTodoFreshness(now - 4 * 24 * 60 * 60_000, now), '上次完整更新 4 天前');
     assert.equal(todoUpdateAgeDays(now - 4 * 24 * 60 * 60_000, now), 4);
+  });
+});
+
+describe('TODO 注释边界与结果上限', () => {
+  const options = { languageId: 'cpp', tags: createTodoTagDefinitions(['TODO']), markdownTasks: false,
+    lineCommentTokens: ['//'], blockCommentTokens: [{ open: '/*', close: '*/' }], ownerIdentities: ['dev'] };
+
+  it('识别同一行的多个注释并跳过跨行原始字符串', () => {
+    const text = ['auto s = u8R"delim(', '// TODO(dev): 假标记', ')delim"; /* 普通注释 */ /* TODO(TODO): 甲 */ // TODO(dev): 乙'].join('\r\n');
+    const matches = parseTodoText(text, options);
+    assert.deepEqual(matches.map(m => [m.line, m.text]), [[2, '甲'], [2, '乙']]);
+    const line = text.split('\r\n')[2]!;
+    const marker = findMarker(text, ['TODO'], 'cpp', 2, line.indexOf('TODO'));
+    assert.ok(marker);
+    assert.equal(line.slice(marker.tagStart, marker.tagEnd), 'TODO');
+    assert.equal(line.slice(marker.syntaxEnd, marker.descriptionEnd), '甲');
+    assert.equal(line.slice(marker.descriptionEnd), ' */ // TODO(dev): 乙');
+    assert.equal(findMarker('// TODOING: 普通文本', ['TODO']), undefined);
+  });
+
+  it('打开的文档按 UTF-8 字节数检查，字符数已超限时跳过读取全文', () => {
+    let reads = 0;
+    const document = (length: number, text: string) => ({
+      lineCount: 1, lineAt: () => ({ range: { end: { line: 0, character: length } } }),
+      offsetAt: () => length, getText: () => { reads++; return text; },
+    }) as unknown as TextDocument;
+    assert.equal(todoDocumentText(document(MAX_TODO_FILE_BYTES + 1, '')), undefined);
+    assert.equal(reads, 0);
+    const chinese = '字'.repeat(Math.ceil(MAX_TODO_FILE_BYTES / 3));
+    assert.equal(todoDocumentText(document(chinese.length, chinese)), undefined);
+    const boundary = 'a'.repeat(MAX_TODO_FILE_BYTES);
+    assert.equal(todoDocumentText(document(boundary.length, boundary)), boundary);
+  });
+
+  it('合并扫描期间的编辑后，个人和项目标记分别遵守工作区总量上限', () => {
+    const index = new TodoIndex(), staging = new TodoIndex();
+    const mine = Array.from({ length: 3500 }, () => ({ ...SAMPLE_MATCH, owner: 'dev' }));
+    staging.replace('a', mine, 1, 'a');
+    staging.replace('b', [SAMPLE_MATCH], 1, 'b');
+    index.replace('c', mine, 2, 'c');
+    index.reconcile(staging.snapshot(), 1);
+    assert.equal(index.limitResults(['dev']), true);
+    assert.equal(index.total, 5001);
+    assert.equal(index.get('b')?.matches.length, 1);
+    index.remove('c');
+    assert.equal(index.total, 3501);
+  });
+
+  it('达到个人结果上限后继续收集项目标记', () => {
+    let limited = false;
+    const matches = parseTodoText('// TODO(dev): 甲\n'.repeat(6200) + '// TODO: 乙', options, () => { limited = true; });
+    assert.ok(limited);
+    assert.equal(matches.length, 5001);
+    assert.equal(matches.at(-1)?.text, '乙');
   });
 });

@@ -13,7 +13,9 @@ import { formatTodoFreshness } from './todoFreshness';
 import { TodoMarker } from './todoMarker';
 import { TodoScanner, TodoScanSummary } from './todoScanner';
 import { isMyTodoOwner } from './todoOwner';
-import { createTodoParseOptionsForPath, getTodoSettings } from './todoSettings';
+import { todoMatches } from './todoParser';
+import { todoDocumentText } from './todoDocumentText';
+import { createTodoParseOptions, createTodoParseOptionsForPath, getTodoSettings } from './todoSettings';
 import { getAllTodoTagChoices, normalizeTodoTagName, normalizeTodoTagNames } from './todoTags';
 import { TodoTreeNode, TodoTreeProvider } from './todoTreeProvider';
 import { TodoUpdateQueue } from './todoUpdateQueue';
@@ -249,14 +251,18 @@ export function registerTodo(
   };
 
   // 标记命令与文档事件共用实时更新入口，使未保存的新增、删除和编辑立即进入索引。
-  const refreshDocumentNow = (document: vscode.TextDocument): void => {
+  const refreshDocumentNow = async (document: vscode.TextDocument): Promise<void> => {
     const key = document.uri.toString();
     const timer = documentTimers.get(key);
     if (timer !== undefined) clearTimeout(timer);
     documentTimers.delete(key);
     if (!isRelevantDocument(document)) return;
-    if (provider.scope === 'currentFile') index.clear();
-    scanner.scanDocument(document);
+    if (provider.scope === 'currentFile') {
+      index.clear();
+      scanner.scanDocument(document);
+    } else {
+      await scanner.scanUri(document.uri, document, () => !disposed && !document.isClosed && provider.scope === 'workspace');
+    }
     updateView(undefined, 'live');
   };
 
@@ -276,23 +282,47 @@ export function registerTodo(
     if (document !== undefined) scheduleDocumentRefresh(document);
   };
 
-  const openResult = async (node?: TodoTreeNode): Promise<void> => {
-    if (node?.kind !== 'result') return;
+  const openResult = async (node?: TodoTreeNode): Promise<boolean> => {
+    if (node?.kind !== 'result') return false;
     const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(node.resource.uri));
     const editor = await vscode.window.showTextDocument(document, { preview: false });
-    const range = new vscode.Range(
-      node.match.line, node.match.startCharacter,
-      node.match.line, node.match.endCharacter,
-    );
+    if (vscode.window.activeTextEditor !== editor) return false;
+    const options = createTodoParseOptions(document.languageId);
+    const text = options && todoDocumentText(document);
+    if (!options || text === undefined) return false;
+    const same = (match: typeof node.match) => match.tag === node.match.tag && match.owner === node.match.owner
+      && match.text === node.match.text && match.source === node.match.source;
+    const previous = node.resource.matches.filter(same);
+    let count = 0, positionsUnchanged = true;
+    let selected: typeof node.match | undefined;
+    for (const match of todoMatches(text, options, true)) {
+      if (!same(match)) continue;
+      const old = previous[count++];
+      positionsUnchanged &&= old?.line === match.line && old.startCharacter === match.startCharacter;
+      if (count === 1 || (match.line === node.match.line && match.startCharacter === node.match.startCharacter)) selected = match;
+    }
+    if (!selected || (count !== 1 || previous.length !== 1) && !(positionsUnchanged && count === previous.length)) return false;
+    const range = new vscode.Range(selected.line, selected.startCharacter, selected.line, selected.endCharacter);
     editor.selection = new vscode.Selection(range.start, range.end);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    return true;
   };
 
-  const editResult = async (node: TodoTreeNode | undefined, edit: () => Promise<boolean>): Promise<boolean> => {
-    if (node?.kind === 'result') await openResult(node);
-    const changed = await edit();
+  const editResult = async (node: TodoTreeNode | undefined, edit: () => Promise<boolean>, toggleCheckbox = false): Promise<boolean> => {
+    if (node?.kind === 'result' && !await openResult(node)) return false;
+    let changed: boolean;
+    if (node?.kind === 'result' && node.match.source === 'markdownTask') {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !toggleCheckbox || editor.document.uri.toString() !== node.resource.uri) return false;
+      const range = editor.selection;
+      const box = editor.document.getText(range);
+      if (!/^\[[ xX]\]$/.test(box)) return false;
+      changed = await editor.edit((builder) => builder.replace(range, box === '[ ]' ? '[x]' : '[ ]'));
+    } else {
+      changed = await edit();
+    }
     const document = vscode.window.activeTextEditor?.document;
-    if (changed && document !== undefined) refreshDocumentNow(document);
+    if (changed && document !== undefined) await refreshDocumentNow(document);
     return changed;
   };
 
@@ -452,7 +482,7 @@ export function registerTodo(
       }
     }),
     onDidChangePersonalConfiguration((event) => {
-      if (!['projectManager.todo', 'files.exclude', 'search.exclude', 'files.encoding', 'files.associations']
+      if (!['projectManager.todo', 'files.encoding', 'files.associations']
         .some((key) => event.affectsConfiguration(key))) return;
       handleEffectiveSettingsChange();
     }),
@@ -472,7 +502,7 @@ export function registerTodo(
     vscode.commands.registerCommand('projectManager.todo.quickMark', () => editActiveDocument(() => marker.quickMark(false))),
     vscode.commands.registerCommand('projectManager.todo.repeatLastMark', () => editActiveDocument(() => marker.quickMark(true))),
     vscode.commands.registerCommand('projectManager.todo.changeMark', (node?: TodoTreeNode) => editResult(node, () => marker.changeMark())),
-    vscode.commands.registerCommand('projectManager.todo.toggleCompleted', (node?: TodoTreeNode) => editResult(node, () => marker.toggleCompleted())),
+    vscode.commands.registerCommand('projectManager.todo.toggleCompleted', (node?: TodoTreeNode) => editResult(node, () => marker.toggleCompleted(), true)),
     vscode.commands.registerCommand('projectManager.todo.removeMark', (node?: TodoTreeNode) => editResult(node, () => marker.removeMark())),
     vscode.commands.registerCommand('projectManager.todo.assignToMe', (node?: TodoTreeNode) => editResult(node, () => marker.assignToMe())),
     vscode.commands.registerCommand('projectManager.todo.unassignMine', (node?: TodoTreeNode) => editResult(node, () => marker.unassignMine())),

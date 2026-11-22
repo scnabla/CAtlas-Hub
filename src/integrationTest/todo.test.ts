@@ -236,7 +236,7 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
     assert.ok(api.todo.index.values().every((entry) => !entry.relativePath.endsWith('.json')));
   });
 
-  test('INT-206 工作区扫描合并 files.exclude 并排除对应源码', async () => {
+  test('INT-206 工作区扫描包含单独屏蔽的未打开源码', async () => {
     const api = await getApi();
     await closeAllEditors();
     const configuration = getPersonalConfiguration('files');
@@ -247,8 +247,27 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
       api.todo.provider.scope = 'workspace';
       const summary = await api.todo.refresh();
       assert.equal(summary.truncated, false);
-      assert.equal(api.todo.index.get(uri.toString()), undefined);
+      assert.equal(api.todo.index.get(uri.toString())?.matches.length, 2);
     } finally {
+      await setWorkspaceSetting('files', 'exclude', original);
+    }
+  });
+
+  test('兼容搜索在文件夹屏蔽后仍能发现未打开的源码', async () => {
+    const api = await getApi();
+    await closeAllEditors();
+    const config = getPersonalConfiguration('files');
+    const original = config.inspect<Record<string, unknown>>('exclude')?.workspaceValue;
+    const source = vscode.Uri.joinPath(currentWorkspaceUri(), 'src', 'todo-sample.ts');
+    const scanner = new TodoScanner(new TodoIndex(), api.output, { search: async () => undefined });
+    const token = new vscode.CancellationTokenSource();
+    try {
+      await setWorkspaceSetting('files', 'exclude', { ...original, src: true });
+      const summary = await scanner.scanWorkspace(token.token);
+      assert.equal(summary.backend, 'vscode');
+      assert.equal(scanner.index.get(source.toString())?.matches.length, 2);
+    } finally {
+      token.dispose();
       await setWorkspaceSetting('files', 'exclude', original);
     }
   });
@@ -675,23 +694,23 @@ suite('代码 TODO 聚合、导航与快速标记', () => {
     assert.equal(TODO_CACHE_KEY.startsWith('projectManager.todo.'), true);
   });
 
-  test('INT-229 关闭排除文件后后台更新将其从个人标记集合移除', async () => {
+  test('INT-229 关闭已屏蔽文件后仍能从磁盘读取标记', async () => {
     const api = await getApi();
     const configuration = getPersonalConfiguration('files');
     const original = configuration.inspect<Record<string, unknown>>('exclude')?.workspaceValue;
     const uri = vscode.Uri.joinPath(currentWorkspaceUri(), 'src', 'todo-sample.ts');
     try {
-      await setGlobalSetting('projectManager.todo', 'showProjectMarkers', false);
+      await setGlobalSetting('projectManager.todo', 'showProjectMarkers', true);
       await setWorkspaceSetting('files', 'exclude', { ...(original ?? {}), 'src/todo-sample.ts': true });
       const editor = await openText(uri);
-      await editor.edit((edit) => edit.insert(new vscode.Position(0, 0), '// TODO(scnable-test): close me\n'));
       api.todo.provider.scope = 'workspace';
       api.todo.scanner.scanDocument(editor.document);
       assert.ok(api.todo.index.get(uri.toString()));
 
       await closeAllEditors();
       await api.todo.waitForIdleForIntegrationTest();
-      await waitUntil(() => api.todo.index.get(uri.toString()) === undefined, '关闭的排除文件仍残留在个人标记集合');
+      await waitUntil(() => api.todo.index.get(uri.toString())?.matches.length === 2, '关闭后未恢复磁盘标记');
+      assert.deepEqual(api.todo.index.get(uri.toString())?.matches.map(match => match.tag), ['TODO', 'FIXME']);
     } finally {
       await setWorkspaceSetting('files', 'exclude', original);
     }

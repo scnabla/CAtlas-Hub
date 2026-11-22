@@ -108,6 +108,7 @@ export function createTodoParseOptions(languageId: string | undefined, settings 
   }
   const syntax = languageId === undefined ? undefined : getTodoCommentSyntax(languageId);
   return syntax === undefined ? undefined : {
+    languageId: languageId!,
     tags: settings.tags,
     markdownTasks: false,
     lineCommentTokens: syntax.lineTokens,

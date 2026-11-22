@@ -35,7 +35,7 @@ export class LocalTodoCandidateSearch implements TodoCandidateSearch {
     excludePatterns: readonly string[],
     token: vscode.CancellationToken,
   ): Promise<TodoCandidateSearchResult | undefined> {
-    const grepArgs = ['grep', '--untracked', '-l', '-z', '-I', '-i', query.mode === 'fixed' ? '-F' : '-E'];
+    const grepArgs = ['grep', '--untracked', '--no-exclude-standard', '-l', '-z', '-I', '-i', query.mode === 'fixed' ? '-F' : '-E'];
     for (const pattern of query.patterns) grepArgs.push('-e', pattern);
     grepArgs.push('--', '.');
     for (const pattern of excludePatterns) grepArgs.push(`:(exclude,glob)${pattern}`);
@@ -60,7 +60,7 @@ export class LocalTodoCandidateSearch implements TodoCandidateSearch {
     const args = ['--files-with-matches', '--null', '--ignore-case', '--hidden', '--no-ignore', '--no-messages'];
     if (query.mode === 'fixed') args.push('--fixed-strings');
     for (const pattern of query.patterns) args.push('--regexp', pattern);
-    for (const glob of TODO_SEARCH_GLOBS) args.push('--glob', glob);
+    for (const glob of TODO_SEARCH_GLOBS) args.push('--iglob', glob);
     for (const pattern of excludePatterns) args.push('--glob', `!${pattern}`);
     args.push('.');
     try {

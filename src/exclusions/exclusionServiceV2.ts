@@ -1,9 +1,9 @@
 import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as path from 'node:path';
 /**
- * 屏蔽资源通过 VS Code 的文件、搜索和监听排除配置实现，不删除实际源码。
+ * 屏蔽资源通过 VS Code 的文件和搜索排除配置实现。
  * 合并父子排除项时保留恢复信息，取消屏蔽不能直接覆盖用户原先已有的规则。
- * 排除配置会影响 TODO 的文件发现与监听；修改屏蔽行为时也要检查未打开文件的扫描场景。
+ * TODO 独立索引工作区源码；被屏蔽资源的磁盘变化可通过普通刷新同步。
  */
 import * as vscode from 'vscode';
 import { buildExclusionPatterns, buildFileTypeExclusionPattern, type ExclusionPatternSet, type ResourceKind } from './exclusionPatterns';
@@ -96,8 +96,10 @@ const SNAPSHOT_KEY = 'projectManager.exclusionConsolidationSnapshots.v1';
 const SETTING_TARGETS: readonly SettingTarget[] = [
   { id: 'explorer', section: 'files', key: 'exclude', label: '目录展示' },
   { id: 'search', section: 'search', key: 'exclude', label: '搜索' },
-  { id: 'watcher', section: 'files', key: 'watcherExclude', label: '文件监控' },
 ];
+
+// 管理历史规则时仍需识别旧版写入的文件监控项。
+const LEGACY_WATCHER: SettingTarget = { id: 'watcher', section: 'files', key: 'watcherExclude', label: '文件监控' };
 
 export class ExclusionServiceV2 {
   public constructor(
@@ -258,7 +260,7 @@ export class ExclusionServiceV2 {
       .get<boolean>('confirmBeforeApply', true);
     if (shouldConfirm) {
       const choice = await vscode.window.showWarningMessage(
-        `将在所选文件所属工作区中屏蔽以下文件类型：${allPatterns.join('、')}。目录、搜索结果和文件监控都会受到影响；C/C++ 等语言扩展可能不再为被屏蔽文件提供大纲符号。`,
+        `将在资源管理器和搜索结果中隐藏以下类型的文件：${allPatterns.join('、')}。`,
         { modal: true },
         '继续屏蔽',
       );
@@ -308,7 +310,7 @@ export class ExclusionServiceV2 {
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
       const explorer = getFolderSetting(folder, SETTING_TARGETS[0]);
       const search = getFolderSetting(folder, SETTING_TARGETS[1]);
-      const watcher = getFolderSetting(folder, SETTING_TARGETS[2]);
+      const watcher = getFolderSetting(folder, LEGACY_WATCHER);
 
       for (const [pattern, value] of Object.entries(explorer)) {
         if (value !== true) {
@@ -363,11 +365,13 @@ export class ExclusionServiceV2 {
           continue;
         }
 
-        const states = this.createSettingStates(folder);
+        const states = this.createSettingStates(folder, [...SETTING_TARGETS, LEGACY_WATCHER]);
         const stateById = new Map(states.map((state) => [state.target.id, state]));
 
         for (const selectedPattern of selectedPatterns) {
           for (const state of states) {
+            if (state.target.id === 'watcher' && !exclusions.some(item => item.folderUri === folderUri
+              && stripRecursiveSuffix(item.pattern) === selectedPattern && item.targets.includes(LEGACY_WATCHER.label))) continue;
             delete state.next[selectedPattern];
             delete state.next[`${selectedPattern}/**`];
           }
@@ -522,8 +526,8 @@ export class ExclusionServiceV2 {
     return { plans: result, coveredCount };
   }
 
-  private createSettingStates(folder: vscode.WorkspaceFolder): SettingState[] {
-    return SETTING_TARGETS.map((target) => {
+  private createSettingStates(folder: vscode.WorkspaceFolder, targets = SETTING_TARGETS): SettingState[] {
+    return targets.map((target) => {
       const configuration = this.getConfiguration(target.section, folder.uri);
       const before = configuration.inspect<ExcludeSetting>(target.key)?.workspaceFolderValue;
       return { target, configuration, before, next: { ...(before ?? {}) } };
@@ -537,7 +541,7 @@ export class ExclusionServiceV2 {
       return true;
     }
     const choice = await vscode.window.showWarningMessage(
-      `将屏蔽 ${resourceCount} 个资源，使其不再出现在目录、搜索结果和文件监控中。C/C++ 等语言扩展可能不再为被屏蔽文件提供大纲符号。`,
+      `将在资源管理器和搜索结果中隐藏 ${resourceCount} 个资源。`,
       { modal: true },
       '继续屏蔽',
     );

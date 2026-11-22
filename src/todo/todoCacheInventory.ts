@@ -1,6 +1,7 @@
 import { getPersonalConfiguration } from '../configuration/personalConfiguration';
 import * as vscode from 'vscode';
-import { createTodoExcludeGlob } from './todoScanPlan';
+import { TODO_SOURCE_GLOB } from './todoCommentSyntax';
+import { isTodoMetadataPath } from './todoScanPlan';
 import { createTodoParseOptionsForPath, getTodoSettings } from './todoSettings';
 import { TODO_CACHE_MAX_FILES, TodoFileStamp } from './todoPersistentCache';
 
@@ -17,15 +18,12 @@ export async function collectTodoInventory(token: vscode.CancellationToken, file
   const settings = getTodoSettings();
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     if (token.isCancellationRequested) return { stamps, complete: false };
-    const exclude = createTodoExcludeGlob(
-      getPersonalConfiguration('files', folder.uri).get('exclude'),
-      getPersonalConfiguration('search', folder.uri).get('exclude'),
-    );
-    const files = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, '**/*'),
-      new vscode.RelativePattern(folder, exclude), TODO_CACHE_MAX_FILES - discovered + 1, token);
+    const files = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, TODO_SOURCE_GLOB),
+      null, TODO_CACHE_MAX_FILES - discovered + 1, token);
     discovered += files.length;
     if (discovered > TODO_CACHE_MAX_FILES) return { stamps, complete: false };
-    const supported = files.filter((uri) => createTodoParseOptionsForPath(uri.path, settings) !== undefined);
+    const supported = files.filter((uri) => !isTodoMetadataPath(vscode.workspace.asRelativePath(uri, false))
+      && createTodoParseOptionsForPath(uri.path, settings) !== undefined);
     for (let offset = 0; offset < supported.length; offset += 8) {
       if (token.isCancellationRequested) return { stamps, complete: false };
       await Promise.all(supported.slice(offset, offset + 8).map(async (uri) => {
@@ -45,13 +43,12 @@ export async function collectTodoInventory(token: vscode.CancellationToken, file
 export function todoCacheSignature(): string {
   const settings = getTodoSettings();
   return JSON.stringify({
-    parserVersion: 1, enabled: settings.enabled, tags: settings.tagNames,
+    parserVersion: 3, enabled: settings.enabled, tags: settings.tagNames,
     markdownTasks: settings.markdownTasks, owners: settings.ownerIdentities,
     project: settings.showProjectMarkers, locale: vscode.env.language,
     roots: (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
       uri: folder.uri.toString(),
-      files: ['exclude', 'encoding', 'associations'].map((key) => getPersonalConfiguration('files', folder.uri).get(key)),
-      search: getPersonalConfiguration('search', folder.uri).get('exclude'),
+      files: ['encoding', 'associations'].map((key) => getPersonalConfiguration('files', folder.uri).get(key)),
     })),
   });
 }

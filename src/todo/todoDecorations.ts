@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { todoDocumentText } from './todoDocumentText';
 import { parseTodoText } from './todoParser';
 import { createTodoParseOptions, getTodoSettings } from './todoSettings';
 import { TodoSeverity } from './todoTypes';
@@ -27,13 +28,26 @@ export class TodoDecorations implements vscode.Disposable {
     for (const editor of vscode.window.visibleTextEditors) this.updateEditor(editor);
   }
 
+  private readonly pending = new Map<vscode.TextDocument, NodeJS.Timeout>();
+
   public updateDocument(document: vscode.TextDocument): void {
+    if (!vscode.window.visibleTextEditors.some((editor) => editor.document === document)) return;
+    clearTimeout(this.pending.get(document));
+    this.pending.set(document, setTimeout(() => {
+      this.pending.delete(document);
+      this.updateVisibleDocument(document);
+    }, 140));
+  }
+
+  private updateVisibleDocument(document: vscode.TextDocument): void {
     for (const editor of vscode.window.visibleTextEditors) {
       if (editor.document === document) this.updateEditor(editor);
     }
   }
 
   public dispose(): void {
+    for (const timer of this.pending.values()) clearTimeout(timer);
+    this.pending.clear();
     for (const type of this.types.values()) type.dispose();
     this.types.clear();
   }
@@ -44,7 +58,7 @@ export class TodoDecorations implements vscode.Disposable {
     const ranges = new Map<TodoSeverity, vscode.Range[]>();
     for (const severity of Object.keys(COLORS) as TodoSeverity[]) ranges.set(severity, []);
     if (settings.enabled && settings.highlight && options !== undefined) {
-      for (const match of parseTodoText(editor.document.getText(), options)) {
+      for (const match of parseTodoText(todoDocumentText(editor.document) ?? '', options)) {
         const severity = settings.tags.find((tag) => tag.name === match.tag)?.severity ?? 'normal';
         ranges.get(severity)?.push(new vscode.Range(
           match.line, match.startCharacter,

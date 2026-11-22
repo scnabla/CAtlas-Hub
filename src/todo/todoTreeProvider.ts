@@ -12,17 +12,21 @@ import { TodoGrouping, TodoMatch, TodoResourceResult, TodoScope } from './todoTy
 
 export type TodoOwnership = 'mine' | 'other';
 
-interface TodoNodeContext {
-  readonly ownership?: TodoOwnership;
-  readonly tag?: string;
-  readonly descriptionKey?: string;
-}
-
 export type TodoTreeNode =
   | { readonly kind: 'ownerGroup'; readonly ownership: TodoOwnership; readonly configured: boolean }
   | { readonly kind: 'category'; readonly descriptionKey: string; readonly label: string; readonly ownership?: TodoOwnership }
   | { readonly kind: 'tag'; readonly tag: string; readonly ownership?: TodoOwnership }
   | { readonly kind: 'result'; readonly resource: TodoResourceResult; readonly match: TodoMatch; readonly grouping: TodoGrouping };
+
+type ResultNode = Extract<TodoTreeNode, { kind: 'result' }>;
+const sortText = new Intl.Collator('zh-CN', { numeric: true }).compare;
+
+interface OwnerRows {
+  readonly results: Map<string, ResultNode[]>;
+  readonly groups: TodoTreeNode[];
+  count: number;
+}
+function emptyRows(): OwnerRows { return { results: new Map(), groups: [], count: 0 }; }
 
 export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeNode>, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<TodoTreeNode | undefined>();
@@ -33,57 +37,67 @@ export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeNode>, 
 
   public constructor(public readonly index: TodoIndex) {}
 
-  public refresh(): void { this.emitter.fire(undefined); }
+  private cached: ReturnType<TodoTreeProvider['buildRows']> | undefined;
+  public refresh(): void { this.cached = undefined; this.emitter.fire(undefined); }
 
-  public get totalResultCount(): number {
-    return this.index.values().reduce((sum, entry) => sum + entry.matches.length, 0);
+  public get totalResultCount(): number { return this.index.total; }
+  public get visibleResultCount(): number { const { mine, other } = this.rows; return mine.count + other.count; }
+
+  private get rows() {
+    if (!this.cached || this.cached.version !== this.index.version || this.cached.filter !== this.filter || this.cached.grouping !== this.grouping) {
+      this.cached = this.buildRows();
+    }
+    return this.cached;
   }
 
-  public get visibleResultCount(): number {
-    return this.countMatches(this.index.values());
+  private buildRows() {
+    const settings = getTodoSettings();
+    const filter = this.filter.trim().toLocaleLowerCase();
+    const mine = emptyRows(), other = emptyRows();
+    for (const resource of this.index.values()) {
+      for (const match of resource.matches) {
+        if (filter && !`${match.tag} ${match.owner ?? ''} ${match.text} ${resource.relativePath}`.toLocaleLowerCase().includes(filter)) continue;
+        const rows = isMyTodoOwner(match.owner, settings.ownerIdentities) ? mine : other;
+        rows.count++;
+        const key = this.grouping === 'tag' ? match.tag : todoDescriptionGroupKey(match.text);
+        let group = rows.results.get(key);
+        if (!group) { group = []; rows.results.set(key, group); }
+        group.push({ kind: 'result', match, resource, grouping: this.grouping });
+      }
+    }
+    for (const ownership of ['mine', 'other'] as const) {
+      const rows = ownership === 'mine' ? mine : other;
+      const keys = [...rows.results.keys()];
+      if (this.grouping === 'tag') keys.sort();
+      else keys.sort((a, b) => sortText(formatTodoDescription(a), formatTodoDescription(b)) || sortText(a, b));
+      for (const key of keys) {
+        rows.groups.push(this.grouping === 'tag' ? { kind: 'tag', tag: key, ownership }
+          : { kind: 'category', descriptionKey: key, label: formatTodoDescription(key), ownership });
+        rows.results.get(key)!.sort((a, b) => sortText(formatTodoDescription(a.match.text), formatTodoDescription(b.match.text))
+          || sortText(a.resource.relativePath, b.resource.relativePath) || a.match.line - b.match.line);
+      }
+    }
+    return { mine, other, settings, filter: this.filter, grouping: this.grouping, version: this.index.version };
   }
 
   public getChildren(node?: TodoTreeNode): TodoTreeNode[] {
-    if (node?.kind === 'ownerGroup') {
-      if (!node.configured && node.ownership === 'mine') return [];
-      return this.groupedNodes(this.filteredResources({ ownership: node.ownership }), { ownership: node.ownership });
+    const rows = this.rows;
+    if (!node) {
+      const configured = rows.settings.owner !== undefined;
+      return [{ kind: 'ownerGroup', ownership: 'mine', configured },
+        ...(rows.settings.showProjectMarkers && rows.other.count ? [{ kind: 'ownerGroup' as const, ownership: 'other' as const, configured }] : [])];
     }
-    if (node?.kind === 'tag') {
-      const context: TodoNodeContext = {
-        tag: node.tag,
-        ...(node.ownership === undefined ? {} : { ownership: node.ownership }),
-      };
-      return this.resultNodes(this.filteredResources(context), context);
-    }
-    if (node?.kind === 'category') {
-      const context: TodoNodeContext = {
-        descriptionKey: node.descriptionKey,
-        ...(node.ownership === undefined ? {} : { ownership: node.ownership }),
-      };
-      return this.resultNodes(this.filteredResources(context), context);
-    }
-    if (node !== undefined) return [];
-
-    const settings = getTodoSettings();
-    const resources = this.filteredResources();
-    const mine = this.countMatches(resources, { ownership: 'mine' });
-    const other = this.countMatches(resources, { ownership: 'other' });
-    if (settings.owner === undefined) {
-      return [
-        { kind: 'ownerGroup', ownership: 'mine', configured: false },
-        ...(!settings.showProjectMarkers || other === 0 ? [] : [{ kind: 'ownerGroup' as const, ownership: 'other' as const, configured: false }]),
-      ];
-    }
-    return [
-      { kind: 'ownerGroup', ownership: 'mine', configured: true },
-      ...(!settings.showProjectMarkers || other === 0 ? [] : [{ kind: 'ownerGroup' as const, ownership: 'other' as const, configured: true }]),
-    ];
+    if (node.kind === 'result') return [];
+    if (node.kind === 'ownerGroup') return !node.configured && node.ownership === 'mine' ? [] : rows[node.ownership].groups;
+    const key = node.kind === 'tag' ? node.tag : node.descriptionKey;
+    return node.ownership ? rows[node.ownership].results.get(key) ?? []
+      : [...(rows.mine.results.get(key) ?? []), ...(rows.other.results.get(key) ?? [])];
   }
 
   public getTreeItem(node: TodoTreeNode): vscode.TreeItem {
     if (node.kind === 'ownerGroup') {
       const isMine = node.ownership === 'mine';
-      const count = this.countMatches(this.filteredResources(), { ownership: node.ownership });
+      const count = this.rows[node.ownership].count;
       const item = new vscode.TreeItem(
         isMine ? '我的标记' : '项目已有标记',
         !node.configured && isMine
@@ -103,7 +117,7 @@ export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeNode>, 
       return item;
     }
     if (node.kind === 'tag') {
-      const count = this.countMatches(this.filteredResources(node), node);
+      const count = this.getChildren(node).length;
       const item = new vscode.TreeItem(node.tag, vscode.TreeItemCollapsibleState.Expanded);
       item.description = String(count);
       item.iconPath = this.tagIcon(node.tag);
@@ -111,7 +125,7 @@ export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeNode>, 
       return item;
     }
     if (node.kind === 'category') {
-      const count = this.countMatches(this.filteredResources(node), node);
+      const count = this.getChildren(node).length;
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
       item.description = String(count);
       item.iconPath = new vscode.ThemeIcon('list-tree');
@@ -124,7 +138,7 @@ export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeNode>, 
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
     item.description = node.grouping === 'category' ? node.match.tag : `${node.match.tag} · ${location}`;
     item.iconPath = this.tagIcon(node.match.tag);
-    const mine = isMyTodoOwner(node.match.owner, getTodoSettings().ownerIdentities);
+    const mine = isMyTodoOwner(node.match.owner, this.rows.settings.ownerIdentities);
     item.contextValue = `projectManager.todo.result.${mine ? 'mine' : 'other'}`;
     item.command = { command: 'projectManager.todo.open', title: '打开 TODO', arguments: [node] };
     const owner = node.match.owner === undefined ? '未分配' : node.match.owner;
@@ -135,63 +149,8 @@ export class TodoTreeProvider implements vscode.TreeDataProvider<TodoTreeNode>, 
 
   public dispose(): void { this.emitter.dispose(); }
 
-  private groupedNodes(resources: readonly TodoResourceResult[], context: TodoNodeContext): TodoTreeNode[] {
-    if (this.grouping === 'tag' && context.tag === undefined) {
-      return [...new Set(resources.flatMap((entry) => this.visibleMatches(entry, context).map((match) => match.tag)))]
-        .sort()
-        .map((tag) => ({ kind: 'tag', tag, ...(context.ownership === undefined ? {} : { ownership: context.ownership }) }));
-    }
-    return [...new Set(resources.flatMap((entry) => this.visibleMatches(entry, context)
-      .map((match) => todoDescriptionGroupKey(match.text))))]
-      .sort((left, right) => formatTodoDescription(left).localeCompare(formatTodoDescription(right), 'zh-CN', { numeric: true })
-        || left.localeCompare(right, 'zh-CN', { numeric: true }))
-      .map((descriptionKey) => ({
-        kind: 'category' as const,
-        descriptionKey,
-        label: formatTodoDescription(descriptionKey),
-        ...(context.ownership === undefined ? {} : { ownership: context.ownership }),
-      }));
-  }
-
-  private filteredResources(context: TodoNodeContext = {}): TodoResourceResult[] {
-    return this.index.values().filter((entry) => this.visibleMatches(entry, context).length > 0);
-  }
-
-  private resultNodes(resources: readonly TodoResourceResult[], context: TodoNodeContext): TodoTreeNode[] {
-    return resources
-      .flatMap((resource) => this.visibleMatches(resource, context).map((match) => ({
-        kind: 'result' as const,
-        resource,
-        match,
-        grouping: this.grouping,
-      })))
-      .sort((left, right) => formatTodoDescription(left.match.text).localeCompare(formatTodoDescription(right.match.text), 'zh-CN', { numeric: true })
-        || left.resource.relativePath.localeCompare(right.resource.relativePath, 'zh-CN', { numeric: true })
-        || left.match.line - right.match.line);
-  }
-
-  private countMatches(resources: readonly TodoResourceResult[], context: TodoNodeContext = {}): number {
-    return resources.reduce((sum, resource) => sum + this.visibleMatches(resource, context).length, 0);
-  }
-
-  private visibleMatches(resource: TodoResourceResult, context: TodoNodeContext): TodoMatch[] {
-    const identities = getTodoSettings().ownerIdentities;
-    return resource.matches
-      .filter((match) => context.tag === undefined || match.tag === context.tag)
-      .filter((match) => context.descriptionKey === undefined
-        || todoDescriptionGroupKey(match.text) === context.descriptionKey)
-      .filter((match) => context.ownership === undefined
-        || (context.ownership === 'mine') === isMyTodoOwner(match.owner, identities))
-      .filter((match) => this.matchesFilter(resource, match));
-  }
-
-  private matchesFilter(resource: TodoResourceResult, match: TodoMatch): boolean {
-    const filter = this.filter.trim().toLocaleLowerCase();
-    return filter.length === 0 || `${match.tag} ${match.owner ?? ''} ${match.text} ${resource.relativePath}`.toLocaleLowerCase().includes(filter);
-  }
-
   private tagIcon(tag: string): vscode.ThemeIcon {
-    const definition = getTodoSettings().tags.find((item) => item.name === tag);
+    const definition = this.rows.settings.tags.find((item) => item.name === tag);
     return new vscode.ThemeIcon(definition?.icon ?? 'check');
   }
 }

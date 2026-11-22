@@ -9,10 +9,23 @@ import { getTodoInsertionToken } from './todoCommentSyntax';
 import { getTodoSettings } from './todoSettings';
 import { normalizeTodoTagName } from './todoTags';
 import { isMyTodoOwner, normalizeTodoOwner, normalizeTodoOwners } from './todoOwner';
+import { todoDocumentText } from './todoDocumentText';
 import { findMarker } from './todoMarkerModel';
 import { collectSelectableTodoDescriptions, normalizeTodoDescription, TODO_DESCRIPTION_MAX_LENGTH, todoDescriptionInputValue } from './todoDescription';
 
 const LAST_TAG_KEY = 'projectManager.todo.lastTag';
+
+function markerAtCursor(editor: vscode.TextEditor, tags: readonly string[]) {
+  const text = todoDocumentText(editor.document);
+  const { line, character } = editor.selection.active;
+  return text === undefined ? undefined : findMarker(text, tags, editor.document.languageId, line, character);
+}
+
+function captureTarget(editor: vscode.TextEditor): () => boolean {
+  const { version } = editor.document;
+  const selection = editor.selection;
+  return () => vscode.window.activeTextEditor === editor && editor.document.version === version && selection.isEqual(editor.selection);
+}
 
 export class TodoMarker {
   public constructor(
@@ -23,6 +36,7 @@ export class TodoMarker {
   public async quickMark(repeatLast = false): Promise<boolean> {
     const editor = await this.getWritableEditor();
     if (editor === undefined) return false;
+    const targetUnchanged = captureTarget(editor);
     const settings = getTodoSettings();
     const owner = settings.owner ?? await this.configureOwner();
     if (owner === undefined) return false;
@@ -31,16 +45,17 @@ export class TodoMarker {
       : await this.chooseTag(settings.tags.map((item) => item.name));
     if (tag === undefined) return false;
     await this.state.update(LAST_TAG_KEY, tag);
+    if (!targetUnchanged()) return false;
     const line = editor.document.lineAt(editor.selection.active.line);
-    const existingMarker = findMarker(line.text, settings.tags.map((item) => item.name));
+    const existingMarker = markerAtCursor(editor, settings.tags.map((item) => item.name));
     const selectedText = editor.document.getText(editor.selection);
     const description = await this.requestDescription(
       existingMarker === undefined
         ? selectedText
-        : this.markerDescription(line.text, existingMarker.syntaxEnd, editor.document.languageId),
+        : line.text.slice(existingMarker.syntaxEnd, existingMarker.descriptionEnd),
       existingMarker === undefined,
     );
-    if (description === undefined) return false;
+    if (description === undefined || !targetUnchanged()) return false;
     if (existingMarker !== undefined) return this.updateExistingMarker(editor, line, existingMarker, tag, description);
     const token = getTodoInsertionToken(editor.document.languageId);
     if (token === undefined) {
@@ -58,27 +73,30 @@ export class TodoMarker {
   public async changeMark(forcedTag?: string): Promise<boolean> {
     const editor = await this.getWritableEditor();
     if (editor === undefined) return false;
+    const targetUnchanged = captureTarget(editor);
     const tags = getTodoSettings().tags.map((item) => item.name);
     const line = editor.document.lineAt(editor.selection.active.line);
-    const marker = findMarker(line.text, tags);
+    const marker = markerAtCursor(editor, tags);
     if (marker === undefined) return this.quickMark(false);
     const tag = normalizeTodoTagName(forcedTag) ?? await this.chooseTag(tags);
     if (tag === undefined || tag === marker.tag) return false;
     const edit = new vscode.WorkspaceEdit();
     edit.replace(editor.document.uri, new vscode.Range(line.lineNumber, marker.tagStart, line.lineNumber, marker.tagEnd), tag);
     await this.state.update(LAST_TAG_KEY, tag);
-    return vscode.workspace.applyEdit(edit);
+    return targetUnchanged() && vscode.workspace.applyEdit(edit);
   }
 
   public async toggleCompleted(): Promise<boolean> {
     const editor = await this.getWritableEditor();
     if (editor === undefined) return false;
     const line = editor.document.lineAt(editor.selection.active.line);
-    const marker = findMarker(line.text, getTodoSettings().tags.map((item) => item.name));
+    const marker = markerAtCursor(editor, getTodoSettings().tags.map((item) => item.name));
     if (marker === undefined) return false;
     const edit = new vscode.WorkspaceEdit();
     if (marker.completedRange !== undefined) {
-      edit.delete(editor.document.uri, new vscode.Range(line.lineNumber, marker.completedRange.start, line.lineNumber, marker.completedRange.end));
+      const range = new vscode.Range(line.lineNumber, marker.completedRange.start, line.lineNumber, marker.completedRange.end);
+      if (marker.completed) edit.delete(editor.document.uri, range);
+      else edit.replace(editor.document.uri, range, editor.document.getText(range).replace('[ ]', '[x]'));
     } else {
       edit.insert(editor.document.uri, new vscode.Position(line.lineNumber, marker.qualifierEnd), ' [x]');
     }
@@ -89,7 +107,7 @@ export class TodoMarker {
     const editor = await this.getWritableEditor();
     if (editor === undefined) return false;
     const line = editor.document.lineAt(editor.selection.active.line);
-    const marker = findMarker(line.text, getTodoSettings().tags.map((item) => item.name));
+    const marker = markerAtCursor(editor, getTodoSettings().tags.map((item) => item.name));
     if (marker === undefined) return false;
     const edit = new vscode.WorkspaceEdit();
     edit.delete(editor.document.uri, new vscode.Range(line.lineNumber, marker.tagStart, line.lineNumber, marker.syntaxEnd));
@@ -117,10 +135,11 @@ export class TodoMarker {
   public async assignToMe(): Promise<boolean> {
     const editor = await this.getWritableEditor();
     if (editor === undefined) return false;
+    const targetUnchanged = captureTarget(editor);
     const owner = getTodoSettings().owner ?? await this.configureOwner();
-    if (owner === undefined) return false;
+    if (owner === undefined || !targetUnchanged()) return false;
     const line = editor.document.lineAt(editor.selection.active.line);
-    const marker = findMarker(line.text, getTodoSettings().tags.map((item) => item.name));
+    const marker = markerAtCursor(editor, getTodoSettings().tags.map((item) => item.name));
     if (marker === undefined || marker.owner?.toLocaleLowerCase() === owner.toLocaleLowerCase()) return false;
     const edit = new vscode.WorkspaceEdit();
     if (marker.ownerRange !== undefined) {
@@ -136,7 +155,7 @@ export class TodoMarker {
     if (editor === undefined) return false;
     const settings = getTodoSettings();
     const line = editor.document.lineAt(editor.selection.active.line);
-    const marker = findMarker(line.text, settings.tags.map((item) => item.name));
+    const marker = markerAtCursor(editor, settings.tags.map((item) => item.name));
     if (marker?.ownerSyntaxRange === undefined || !isMyTodoOwner(marker.owner, settings.ownerIdentities)) return false;
     const edit = new vscode.WorkspaceEdit();
     edit.delete(editor.document.uri, new vscode.Range(
@@ -184,24 +203,6 @@ export class TodoMarker {
     return normalizeTodoDescription(value);
   }
 
-  private markerDescription(line: string, syntaxEnd: number, languageId: string): string {
-    const close = this.markerClosingToken(line, languageId);
-    let value = line.slice(syntaxEnd).trim();
-    if (close.length > 0 && value.endsWith(close)) {
-      value = value.slice(0, -close.length).trimEnd();
-    }
-    return value;
-  }
-
-  private markerClosingToken(line: string, languageId: string): string {
-    const configured = getTodoInsertionToken(languageId)?.close ?? '';
-    if (configured.length > 0) return configured;
-    const trimmed = line.trimEnd();
-    if (trimmed.endsWith('-->')) return '-->';
-    if (trimmed.endsWith('*/')) return '*/';
-    return '';
-  }
-
   private async updateExistingMarker(
     editor: vscode.TextEditor,
     line: vscode.TextLine,
@@ -209,18 +210,15 @@ export class TodoMarker {
     tag: string,
     description: string,
   ): Promise<boolean> {
-    const currentDescription = this.markerDescription(line.text, marker.syntaxEnd, editor.document.languageId);
+    const currentDescription = line.text.slice(marker.syntaxEnd, marker.descriptionEnd);
     if (tag === marker.tag && description === currentDescription) return false;
-    const close = this.markerClosingToken(line.text, editor.document.languageId);
-    const trimmedEnd = line.text.trimEnd().length;
-    const hasClosingToken = close.length > 0 && line.text.slice(0, trimmedEnd).endsWith(close);
-    const replacement = hasClosingToken ? `${description} ${close}` : description;
+    const needsSpace = currentDescription.length === 0 && !/\s/.test(line.text[marker.syntaxEnd - 1] ?? '');
+    const replacement = needsSpace ? ' ' + description : description;
     const edit = new vscode.WorkspaceEdit();
     if (tag !== marker.tag) {
       edit.replace(editor.document.uri, new vscode.Range(line.lineNumber, marker.tagStart, line.lineNumber, marker.tagEnd), tag);
     }
-    edit.replace(editor.document.uri, new vscode.Range(line.lineNumber, marker.syntaxEnd, line.lineNumber, line.text.length), replacement);
-    await this.state.update(LAST_TAG_KEY, tag);
+    edit.replace(editor.document.uri, new vscode.Range(line.lineNumber, marker.syntaxEnd, line.lineNumber, marker.descriptionEnd), replacement);
     return vscode.workspace.applyEdit(edit);
   }
 
@@ -230,6 +228,7 @@ export class TodoMarker {
       await vscode.window.showInformationMessage('请先打开可编辑的文本文件。');
       return undefined;
     }
+    if (todoDocumentText(editor.document) === undefined) return undefined;
     if (vscode.workspace.fs.isWritableFileSystem(editor.document.uri.scheme) === false) {
       await vscode.window.showWarningMessage('当前文档提供器是只读的，不能写入 TODO 标记。');
       return undefined;
