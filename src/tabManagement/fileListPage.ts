@@ -1,12 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
+import { getUriDisplayPath } from '../shared/uri';
+import type { OpenedFileTreeNode } from './openedFilesTreeModel';
 
 export interface FileListRow {
   key: string;
   label: string;
   children?: FileListRow[];
   title?: string;
-  pathPrefix?: string;
+}
+
+export function fileListRow(node: OpenedFileTreeNode, onFile?: (file: OpenedFileTreeNode) => void): FileListRow {
+  const label = node.label.replace(/\r/g, '␍').replace(/\n/g, '␊');
+  if (node.kind === 'file') {
+    onFile?.(node);
+    return { key: node.id, label, title: node.uri ? getUriDisplayPath(vscode.Uri.parse(node.uri)) : label };
+  }
+  return { key: node.id, label, children: node.children.map(child => fileListRow(child, onFile)) };
 }
 
 // vscode.openWith 的公开选项无法同时指定后台打开、固定和首位。
@@ -27,21 +37,25 @@ export function fileListGesture(uri: vscode.Uri, subject: '路径' | '文件名'
 }
 
 export function bindFileListPage(
-  panel: vscode.WebviewPanel, uri: vscode.Uri, subject: '路径' | '文件名',
+  panel: vscode.WebviewPanel, uri: vscode.Uri, emptyHint: string,
   getRows: () => FileListRow[], changed: vscode.Event<unknown>,
   select: (key: string) => void | Promise<void>,
 ): void {
   panel.webview.options = { enableScripts: true, localResourceRoots: [] };
   const nonce = randomUUID();
-  let previous = '';
-  function update(force = false) {
-    if (!panel.visible) return;
+  function pageData() {
     const rows = getRows();
-    const gesture = fileListGesture(uri, subject);
-    const emptyHint = subject === '路径' ? '当前没有已打开的外部文件' : '当前工作区没有已打开的文件';
-    const data = { ...gesture, hint: rows.length ? gesture.hint : emptyHint, rows };
+    const gesture = fileListGesture(uri, '文件名');
+    return { ...gesture, hint: rows.length ? gesture.hint : emptyHint, rows };
+  }
+  const initial = JSON.stringify(pageData());
+  let previous = initial;
+  let ready = false;
+  function update() {
+    if (!ready || !panel.visible) return;
+    const data = pageData();
     const signature = JSON.stringify(data);
-    if (force || signature !== previous) {
+    if (signature !== previous) {
       previous = signature;
       void panel.webview.postMessage(data);
     }
@@ -53,7 +67,11 @@ export function bindFileListPage(
     }),
     panel.onDidChangeViewState(() => update()),
     panel.webview.onDidReceiveMessage(async message => {
-      if (message?.type === 'ready') update(true);
+      if (message?.type === 'ready') {
+        ready = true;
+        previous = initial;
+        update();
+      }
       if (message?.type === 'select' && typeof message.key === 'string') await select(message.key);
     }),
   );
@@ -72,7 +90,7 @@ strong{display:block;margin-bottom:.45em}ul{margin:0;padding:0;list-style:none}
 .tree-item::after{top:.8em;width:.55em;border-top-style:solid;border-top-width:2px}
 .folder,.file{min-width:0;overflow-wrap:anywhere}
 button{all:unset;font:inherit;color:inherit;cursor:pointer;white-space:pre-wrap;overflow-wrap:anywhere}
-.file{user-select:text;color:var(--vscode-projectManager-fileListNameForeground,var(--vscode-editor-foreground))}.file:hover,.file:focus-visible{text-decoration:underline}.folder,.path-prefix{color:var(--vscode-projectManager-fileListPathForeground,var(--vscode-editor-foreground))}
+.file{user-select:text;color:var(--vscode-projectManager-fileListNameForeground,var(--vscode-editor-foreground))}.file:hover,.file:focus-visible{text-decoration:underline}.folder{color:var(--vscode-projectManager-fileListPathForeground,var(--vscode-editor-foreground))}
 button:focus-visible{outline:1px solid var(--vscode-focusBorder)}
 </style></head><body><strong id="hint"></strong><ul id="rows"></ul><script nonce="${nonce}">
 const host=acquireVsCodeApi(),rows=document.getElementById('rows'),hint=document.getElementById('hint');
@@ -88,10 +106,6 @@ function renderRows(items,showBranches){
       list.append(...renderRows(row.children,true));li.append(list);
     }else{
       const button=document.createElement('button');button.type='button';button.className='file';
-      if(row.pathPrefix){
-        const prefix=document.createElement('span');prefix.className='path-prefix';prefix.textContent=row.pathPrefix;
-        button.append(prefix);
-      }
       button.append(row.label);button.dataset.key=row.key;if(row.title)button.title=row.title;
       entry.append(button);
     }
@@ -107,12 +121,14 @@ rows.addEventListener('dblclick',event=>{
   const b=event.target.closest('button.file');
   if(b&&event.button===0&&!(modifier&&event[modifier])){event.preventDefault();select(b);}
 });
-window.addEventListener('message',({data})=>{
+function render(data){
   const focused=document.activeElement?.dataset?.key;
   modifier=data.modifier;hint.textContent=data.hint;
-  rows.replaceChildren(...renderRows(data.rows,${subject === '文件名' ? 'data.rows.length>1' : 'false'}));
+  rows.replaceChildren(...renderRows(data.rows,data.rows.length>1));
   if(focused){const next=[...rows.querySelectorAll('button')].find(b=>b.dataset.key===focused);next?.focus({preventScroll:true});}
-});
+}
+window.addEventListener('message',({data})=>render(data));
+render(${initial.replace(/</g, '\\u003c')});
 host.postMessage({type:'ready'});
 </script></body></html>`;
 }

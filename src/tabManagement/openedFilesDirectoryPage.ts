@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import { bindFileListPage, FileListRow, openFileListTab } from './fileListPage';
-import { getUriDisplayPath } from '../shared/uri';
-import { externalTabUri } from './externalFileList';
+import { bindFileListPage, fileListRow, openFileListTab } from './fileListPage';
+import { isExternalFileListTab } from './externalFileList';
 import { OpenedFileTreeNode } from './openedFilesTreeModel';
 import { OpenedFilesTreeProvider } from './openedFilesTreeProvider';
 
@@ -16,20 +15,26 @@ export class OpenedFilesDirectoryPage implements vscode.CustomReadonlyEditorProv
 
   constructor(private readonly provider: OpenedFilesTreeProvider, private readonly enabled: () => boolean) {}
 
+  get missing(): boolean {
+    return this.enabled() && !vscode.window.tabGroups.all.some(group => group.tabs.some(isDirectoryTab));
+  }
+
   async reconcile(): Promise<void> {
     const groups = vscode.window.tabGroups.all;
     const existing = groups.flatMap(group => group.tabs).filter(isDirectoryTab);
-    const candidates = groups.filter(group => !group.tabs.some(externalTabUri) && group.tabs.some(tab =>
+    const ordinaryGroups = groups.filter(group => !group.tabs.some(isExternalFileListTab));
+    const workspaceGroups = ordinaryGroups.filter(group => group.tabs.some(tab =>
       tab.input instanceof vscode.TabInputText && vscode.workspace.getWorkspaceFolder(tab.input.uri)));
+    const hasExternalSplit = ordinaryGroups.length < groups.length && !!vscode.workspace.workspaceFolders?.length;
+    const candidates = hasExternalSplit && !workspaceGroups.length ? ordinaryGroups : workspaceGroups;
     if (!this.enabled() || !candidates.length) {
       if (existing.length) await vscode.window.tabGroups.close(existing, true);
       return;
     }
-    const tab = existing[0];
-    const group = tab && !tab.group.tabs.some(externalTabUri) ? tab.group
-      : this.previousGroup && candidates.includes(this.previousGroup) ? this.previousGroup : candidates[0]!;
+    const tab = existing.find(item => ordinaryGroups.includes(item.group));
+    const group = tab?.group ?? candidates.find(item => item === this.previousGroup) ?? candidates[0]!;
     this.previousGroup = group;
-    if (!tab || tab.group !== group || !tab.isPinned || group.tabs[0] !== tab) {
+    if (!tab || !tab.isPinned || group.tabs[0] !== tab) {
       await openFileListTab(directoryUri, directoryPageId, group.viewColumn, true);
     }
     const duplicates = existing.filter(item => item.group !== group);
@@ -40,7 +45,7 @@ export class OpenedFilesDirectoryPage implements vscode.CustomReadonlyEditorProv
     if (!this.enabled()) return;
     const groups = vscode.window.tabGroups;
     const group = groups.all.find(item => item.tabs.some(isDirectoryTab))
-      ?? (groups.activeTabGroup.tabs.some(externalTabUri) ? groups.all.find(item => !item.tabs.some(externalTabUri)) : groups.activeTabGroup);
+      ?? (groups.activeTabGroup.tabs.some(isExternalFileListTab) ? groups.all.find(item => !item.tabs.some(isExternalFileListTab)) : groups.activeTabGroup);
     if (group) await openFileListTab(directoryUri, directoryPageId, group.viewColumn, false);
   }
 
@@ -59,19 +64,9 @@ export class OpenedFilesDirectoryPage implements vscode.CustomReadonlyEditorProv
 
   resolveCustomEditor(_document: vscode.CustomDocument, panel: vscode.WebviewPanel): void {
     const items = new Map<string, OpenedFileTreeNode>();
-    const row = (node: OpenedFileTreeNode): FileListRow => {
-      if (node.kind === 'file') {
-        items.set(node.id, node);
-        return { key: node.id, label: node.label, title: node.uri ? getUriDisplayPath(vscode.Uri.parse(node.uri)) : node.label };
-      }
-      return {
-        key: node.id, label: node.label,
-        children: node.children.map(row),
-      };
-    };
-    bindFileListPage(panel, directoryUri, '文件名', () => {
+    bindFileListPage(panel, directoryUri, '当前工作区没有已打开的文件', () => {
       items.clear();
-      return this.provider.getChildren().map(row);
+      return this.provider.getChildren().map(root => fileListRow(root, file => items.set(file.id, file)));
     }, this.provider.onDidChangeTreeData, async key => {
       const node = items.get(key);
       if (node) await this.provider.focusFile(node);

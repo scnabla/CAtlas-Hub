@@ -65,7 +65,7 @@ export function buildOpenedFilesTree(files: readonly OpenedFileDescriptor[]): Op
     }
   }
 
-  return compactDirectoryChains(roots);
+  return roots;
 }
 
 export function deduplicateOpenedFiles(
@@ -100,10 +100,13 @@ function buildGroupChildren(files: readonly OpenedFileDescriptor[], groupId: str
 
   for (const workspaceId of workspaceOrder) {
     const workspaceFiles = files.filter((file) => file.workspaceId === workspaceId);
-    const workspaceChildren: MutableNode[] = [];
-    for (const file of workspaceFiles) {
-      insertFile(workspaceChildren, file, `group:${groupId}:workspace:${workspaceId}`);
-    }
+    const workspaceChildren = buildFilePathTree(workspaceFiles.map(file => ({
+      directories: file.pathSegments.slice(0, -1),
+      file: {
+        id: `file:${file.id}`, kind: 'file', label: file.label, uri: file.uri,
+        groupId: file.groupId, tabId: file.id, active: file.active, preview: file.preview,
+      },
+    })), `group:${groupId}:workspace:${workspaceId}`);
     if (multipleWorkspaces || workspaceFiles.some(file => file.pathSegments.length === 1)) {
       children.push({
         id: `group:${groupId}:workspace:${workspaceId}`,
@@ -120,40 +123,32 @@ function buildGroupChildren(files: readonly OpenedFileDescriptor[], groupId: str
   return children;
 }
 
-function insertFile(
-  roots: MutableNode[],
-  file: OpenedFileDescriptor,
-  parentId: string,
-): void {
-  let current = roots;
-  let currentId = parentId;
-  for (const segment of file.pathSegments.slice(0, -1)) {
-    const nextId = `${currentId}/dir:${encodeURIComponent(segment)}`;
-    let directory = current.find((node) => node.id === nextId);
-    if (directory === undefined) {
-      directory = {
-        id: nextId,
-        kind: 'directory',
-        label: `${segment}/`,
-        groupId: file.groupId,
-        children: [],
-      };
-      current.push(directory);
+interface FilePathEntry {
+  directories: readonly string[];
+  file: Omit<MutableNode, 'children'>;
+  ignoreDirectoryCase?: boolean;
+}
+
+export function buildFilePathTree(entries: readonly FilePathEntry[], rootId: string): MutableNode[] {
+  const roots: MutableNode[] = [];
+  const folders = new Map<string, MutableNode>();
+  for (const { directories, file, ignoreDirectoryCase } of entries) {
+    let children = roots;
+    let id = rootId;
+    for (const segment of directories) {
+      id += `/dir:${encodeURIComponent(ignoreDirectoryCase ? segment.toLowerCase() : segment)}`;
+      let folder = folders.get(id);
+      if (!folder) {
+        folder = { id, kind: 'directory', label: segment + '/', children: [] };
+        if (file.groupId !== undefined) folder.groupId = file.groupId;
+        children.push(folder);
+        folders.set(id, folder);
+      }
+      children = folder.children;
     }
-    current = directory.children;
-    currentId = nextId;
+    children.push({ ...file, children: [] });
   }
-  current.push({
-    id: `file:${file.id}`,
-    kind: 'file',
-    label: file.label,
-    uri: file.uri,
-    groupId: file.groupId,
-    tabId: file.id,
-    active: file.active,
-    preview: file.preview,
-    children: [],
-  });
+  return compactDirectoryChains(roots);
 }
 
 function compactDirectoryChains(nodes: readonly MutableNode[]): MutableNode[] {

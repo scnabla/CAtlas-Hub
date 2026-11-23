@@ -2,7 +2,7 @@
   "name": "catlas-hub-tools",
   "displayName": "CAtlas Hub",
   "description": "增强 VS Code 的项目切换、代码浏览、标签组织和便携开发设置。",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "scnabla",
   "license": "MIT",
   "icon": "media/catlas-hub.png",
@@ -35,6 +35,7 @@
     "onFileSystem:catlas-external-files",
     "onLanguage:jsonc",
     "onLanguage:dts",
+    "onLanguage:shellscript",
     "onView:projectManager.projectsView",
     "onView:projectManager.configurationView",
     "onView:projectManager.todoView",
@@ -58,6 +59,10 @@
       }
     ],
     "configurationDefaults": {
+      "workbench.colorCustomizations": {
+        "editorGroup.border": "#FF9800",
+        "sash.hoverBorder": "#FFBF33"
+      },
       "workbench.editor.showTabs": "multiple",
       "workbench.editor.wrapTabs": true
     },
@@ -948,7 +953,9 @@
     "icons:check": "node scripts/generate-icons.mjs --check",
     "icons:export": "node scripts/export-marketplace-icon.mjs",
     "icons:generate": "node scripts/generate-icons.mjs --write",
+    "precompile": "node scripts/prepare-shell-parser.mjs",
     "compile": "tsc -p ./",
+    "prewatch": "node scripts/prepare-shell-parser.mjs",
     "watch": "tsc -watch -p ./",
     "check": "npm run icons:check && tsc --noEmit -p ./",
     "test": "npm run test:unit",
@@ -970,6 +977,8 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "3.9.1",
     "sinon": "^22.1.0",
+    "tree-sitter-bash": "0.25.1",
+    "web-tree-sitter": "0.25.10",
     "typescript": "^5.8.0",
     "yauzl": "3.4.0"
   }

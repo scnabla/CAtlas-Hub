@@ -5,6 +5,7 @@
  * 返回的 ProjectButlerApi 暴露实际运行实例供集成测试使用，修改注册顺序时也要检查测试调用。
  */
 import * as vscode from 'vscode';
+import { registerShellNavigation } from './shell/shellNavigation';
 import { registerDevicetreeDiagnostics } from './devicetree/diagnostics';
 import { registerDataLocationCommand } from './configuration/dataLocationCommand';
 import { initializePersonalConfiguration } from './configuration/personalConfiguration';
@@ -41,6 +42,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Projec
   );
 
   registerDevicetreeDiagnostics(context);
+  registerShellNavigation(context);
   registerExcludeResourcesCommand(context, exclusionService, output);
   registerManageExclusionsCommand(context, exclusionService, output);
   const catalogs = registerProjectCatalogV2(context, output);

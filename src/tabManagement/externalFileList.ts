@@ -1,12 +1,17 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { getUriComparisonKey, getUriDisplayPath } from '../shared/uri';
 
-import { bindFileListPage, fileListGesture } from './fileListPage';
+import { bindFileListPage, fileListGesture, fileListRow } from './fileListPage';
+import { buildFilePathTree } from './openedFilesTreeModel';
 
 export const externalEditorId = 'projectManager.externalFileList';
 export const externalTabUri = (tab: vscode.Tab | undefined) => tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === externalEditorId
   ? tab.input.uri : undefined;
 export const markerUri = vscode.Uri.from({ scheme: 'catlas-external-files', path: '/↗ 外部文件' });
+export function isExternalFileListTab(tab: vscode.Tab): boolean {
+  return !!externalTabUri(tab) || (tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === markerUri.toString());
+}
 const orderSetting = 'catlas.externalFiles.openOrder';
 
 function directoryKey(uri: vscode.Uri): string {
@@ -16,6 +21,27 @@ function directoryKey(uri: vscode.Uri): string {
 function pathLine(uri: vscode.Uri): string {
   // Linux 文件名可以含换行；只转义显示文字，链接始终使用原 URI。
   return getUriDisplayPath(uri).replace(/\r/g, '␍').replace(/\n/g, '␊');
+}
+
+function externalFileRows(files: readonly vscode.Uri[]) {
+  const entries = files.map(uri => {
+    const local = uri.scheme === 'file';
+    const root = local ? path.parse(uri.fsPath).root : '/';
+    const segments = local
+      ? uri.fsPath.slice(root.length).split(path.sep)
+      : uri.path.split('/');
+    const filename = segments.pop() ?? '';
+    const rootLabel = local
+      ? root.split(path.sep).join('/').replace(/\/$/, '')
+      : getUriDisplayPath(uri.with({ path: '', query: '', fragment: '' })).replace(/\/$/, '');
+    const key = uri.toString();
+    return {
+      directories: [rootLabel, ...segments.filter(Boolean)],
+      file: { id: key, kind: 'file' as const, uri: key, label: filename },
+      ignoreDirectoryCase: local && process.platform === 'win32',
+    };
+  });
+  return buildFilePathTree(entries, 'external').map(node => fileListRow(node));
 }
 
 function clickHint(): string {
@@ -96,13 +122,7 @@ export class ExternalFileList implements vscode.CustomReadonlyEditorProvider, vs
   }
 
   resolveCustomEditor(_document: vscode.CustomDocument, panel: vscode.WebviewPanel): void {
-    bindFileListPage(panel, markerUri, '路径',
-      () => this.files.map(uri => {
-        const fullPath = pathLine(uri);
-        const parentPath = uri.path.slice(0, uri.path.lastIndexOf('/') + 1);
-        const pathPrefix = pathLine(uri.with({ path: parentPath, query: '', fragment: '' }));
-        return { key: uri.toString(), label: fullPath.slice(pathPrefix.length), pathPrefix };
-      }),
+    bindFileListPage(panel, markerUri, '当前没有已打开的外部文件', () => externalFileRows(this.files),
       this.onDidChange, async key => {
         const group = vscode.window.tabGroups.all.find(item => item.viewColumn === panel.viewColumn);
         const tab = group?.tabs.find(item => item.input instanceof vscode.TabInputText && item.input.uri.toString() === key);

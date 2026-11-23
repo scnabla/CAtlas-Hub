@@ -18,7 +18,9 @@ export function registerOpenedFilesTree(
   const page = new OpenedFilesDirectoryPage(provider, () => modeService.mode === 'directoryTree');
   context.subscriptions.push(
     provider,
-    vscode.window.registerCustomEditorProvider(directoryPageId, page, { webviewOptions: { enableFindWidget: true } }),
+    vscode.window.registerCustomEditorProvider(directoryPageId, page, {
+      webviewOptions: { enableFindWidget: true, retainContextWhenHidden: true },
+    }),
     vscode.window.registerWebviewPanelSerializer(directoryPageId, page),
     vscode.commands.registerCommand('projectManager.openOpenedFilesDirectory', () => page.show()),
     modeService,

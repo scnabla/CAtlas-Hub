@@ -552,4 +552,79 @@ suite('已安装 VSIX', () => {
     }
   });
 
+  test('INT-254 当前 Shell 脚本内的函数大纲、分色和变量定义跳转', async () => {
+    const api = await vscode.extensions.getExtension<ProjectButlerApi>(EXTENSION_ID)!.activate();
+    const source = ['#!/usr/bin/env bash', '# 中文🟢', 'dest=global', 'function prepare {',
+      '  local dest=build', '  echo "${dest}"', '}', 'prepare', 'echo "$dest"',
+      'echo prepare "$UNDEFINED"'].join('\r\n');
+    const dir = await fs.mkdtemp(path.join(vscode.workspace.workspaceFolders![0]!.uri.fsPath, 'catlas-shell-'));
+    const uri = vscode.Uri.file(path.join(dir, 'build.sh'));
+    try {
+      await fs.writeFile(uri.fsPath, source);
+      const document = await vscode.workspace.openTextDocument(uri);
+      assert.equal(document.languageId, 'shellscript');
+      const editor = await vscode.window.showTextDocument(document, { preview: false });
+      await api.tabs.waitForIdleForIntegrationTest();
+      type TextMateToken = { c: string; t: string; r: Record<string, string> };
+      const syntax = await vscode.commands.executeCommand<TextMateToken[]>('_workbench.captureSyntaxTokens', uri);
+      const comment = syntax.find(t => t.t.includes('comment') && t.c.includes('中文'));
+      const fn = syntax.find(t => t.c === 'prepare' && t.t.includes('entity.name.function'));
+      for (const theme of ['dark_plus', 'light_plus']) {
+        assert.ok(comment?.r[theme] && fn?.r[theme], theme);
+        assert.notEqual(comment.r[theme], fn.r[theme]);
+      }
+      async function definitions(line: number, column: number) {
+        const found = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+          'vscode.executeDefinitionProvider', document.uri, new vscode.Position(line, column));
+        return found.map(item => {
+          const uri = 'uri' in item ? item.uri : item.targetUri;
+          assert.equal(uri.toString(), document.uri.toString());
+          return ('range' in item ? item.range : item.targetSelectionRange ?? item.targetRange).start.line;
+        });
+      }
+      await api.outline.refreshSymbols('Shell 函数导航');
+      const symbols = api.outline.getStateForIntegrationTest().symbols;
+      assert.deepEqual(symbols.map(s => s.name), ['prepare']);
+      await api.outline.jumpToSymbolForIntegrationTest(symbols[0]!.id);
+      assert.equal(document.getText(editor.selection), 'prepare');
+      assert.deepEqual(await definitions(7, 2), [3]);
+      assert.deepEqual(await definitions(5, 11), [4]);
+      assert.deepEqual(await definitions(8, 8), [2]);
+      assert.deepEqual(await definitions(9, 6), []);
+      assert.deepEqual(await definitions(9, 17), []);
+      const tokens = await vscode.commands.executeCommand<vscode.SemanticTokens>(
+        'vscode.provideDocumentSemanticTokens', document.uri);
+      assert.deepEqual(Array.from(tokens.data), [3, 9, 7, 0, 0, 4, 0, 7, 0, 0]);
+      await editor.edit(edit => edit.insert(new vscode.Position(0, 0), '# edit\n'));
+      assert.deepEqual(await definitions(8, 2), [4]);
+      assert.deepEqual(await definitions(6, 11), [5]);
+      const padding = '# 中文🟢\n'.repeat(12000);
+      await editor.edit(edit => edit.insert(document.lineAt(document.lineCount - 1).range.end, '\n' + padding));
+      assert.deepEqual(await definitions(8, 2), [4]);
+      assert.deepEqual(await definitions(6, 11), [5]);
+    } finally {
+      if (vscode.window.activeTextEditor?.document.uri.toString() === uri.toString()) {
+        await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      }
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('INT-255 分栏线默认使用橘黄色且保留个人配色优先级', async () => {
+    const config = vscode.workspace.getConfiguration('workbench');
+    const key = 'colorCustomizations';
+    type Colors = Record<string, string>;
+    const defaults = config.inspect<Colors>(key)?.defaultValue;
+    assert.equal(defaults?.['editorGroup.border'], '#FF9800');
+    assert.equal(defaults?.['sash.hoverBorder'], '#FFBF33');
+    const original = config.inspect<Colors>(key)?.workspaceValue;
+    try {
+      await config.update(key, { ...original, 'editorGroup.border': '#abcdef' }, vscode.ConfigurationTarget.Workspace);
+      const effective = vscode.workspace.getConfiguration('workbench').get<Colors>(key)!;
+      assert.equal(effective['editorGroup.border'], '#abcdef');
+      assert.equal(effective['sash.hoverBorder'], '#FFBF33');
+    } finally {
+      await config.update(key, original, vscode.ConfigurationTarget.Workspace);
+    }
+  });
 });

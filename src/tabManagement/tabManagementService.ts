@@ -4,7 +4,7 @@ import { OpenedFilesDirectoryPage } from './openedFilesDirectoryPage';
 import { onDidChangePersonalConfiguration } from '../configuration/personalConfiguration';
 import { ProjectFeatureConfigurationSource } from '../configuration/configurationTypes';
 import { getUriComparisonKey } from '../shared/uri';
-import { ExternalFileList, externalEditorId, externalTabUri, markerUri } from './externalFileList';
+import { ExternalFileList, externalEditorId, externalTabUri, isExternalFileListTab, markerUri } from './externalFileList';
 import { resolveEffectiveTabSettings } from './tabSettings';
 
 const groups = () => vscode.window.tabGroups;
@@ -15,12 +15,8 @@ function uriOf(tab: vscode.Tab | undefined): vscode.Uri | undefined {
   return tab?.input instanceof vscode.TabInputText ? tab.input.uri : undefined;
 }
 
-function isMarker(tab: vscode.Tab): boolean {
-  return (externalTabUri(tab) ?? uriOf(tab))?.toString() === markerUri.toString();
-}
-
 function externalGroup(): vscode.TabGroup | undefined {
-  return groups().all.find(group => group.tabs.some(isMarker));
+  return groups().all.find(group => group.tabs.some(isExternalFileListTab));
 }
 
 function isFile(uri: vscode.Uri): boolean {
@@ -49,7 +45,9 @@ export class TabManagementService implements vscode.Disposable {
     this.fileList = new ExternalFileList(state);
     this.disposables = [
       this.fileList,
-      vscode.window.registerCustomEditorProvider(externalEditorId, this.fileList, { webviewOptions: { enableFindWidget: true } }),
+      vscode.window.registerCustomEditorProvider(externalEditorId, this.fileList, {
+        webviewOptions: { enableFindWidget: true, retainContextWhenHidden: true },
+      }),
       vscode.workspace.registerTextDocumentContentProvider(markerUri.scheme, this.fileList),
       vscode.languages.registerDocumentLinkProvider({ scheme: markerUri.scheme }, this.fileList),
       groups().onDidChangeTabs(event => {
@@ -62,8 +60,10 @@ export class TabManagementService implements vscode.Disposable {
           const uri = uriOf(tab);
           if (uri && isExternal(uri)) this.fileList.open(uri);
         }
-        if (event.opened.length || event.closed.length) this.schedule();
+        if (event.opened.length || event.closed.length
+          || (event.changed.some(tab => !!uriOf(tab)) && this.directory.missing)) this.schedule();
       }),
+      groups().onDidChangeTabGroups(() => this.schedule()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.schedule()),
       onDidChangePersonalConfiguration(event => {
         if (event.affectsConfiguration('projectManager.tabs') || event.affectsConfiguration('editor.multiCursorModifier')
@@ -107,6 +107,15 @@ export class TabManagementService implements vscode.Disposable {
   }
 
   private async reconcile(route: boolean): Promise<void> {
+    if (!groups().all.length) return;
+    try {
+      await this.reconcileExternalFiles(route);
+    } finally {
+      if (!this.disposed) await this.directory.reconcile();
+    }
+  }
+
+  private async reconcileExternalFiles(route: boolean): Promise<void> {
     const folders = vscode.workspace.workspaceFolders;
     let target = externalGroup();
     const active = groups().activeTabGroup.activeTab;
@@ -145,10 +154,13 @@ export class TabManagementService implements vscode.Disposable {
         }
         // VS Code 会收起移走最后一个标签的组，留出左栏供打开项目文件。
         if (hasExternal && groups().all.length === 1 && externalGroup()) {
-          const editor = vscode.window.activeTextEditor;
+          const selected = externalGroup()?.activeTab;
+          const selectedFile = selected?.input instanceof vscode.TabInputText ? selected.input.uri : undefined;
           await vscode.commands.executeCommand('workbench.action.newGroupLeft');
           const right = externalGroup();
-          if (editor && right) await vscode.window.showTextDocument(editor.document, { viewColumn: right.viewColumn, preview: false });
+          if (selected && selectedFile && right && findTab(right, selectedFile)) {
+            await vscode.window.showTextDocument(selectedFile, { viewColumn: right.viewColumn, preview: selected.isPreview });
+          }
         }
       }
     }
@@ -158,7 +170,7 @@ export class TabManagementService implements vscode.Disposable {
       .filter((uri): uri is vscode.Uri => !!uri && isExternal(uri));
     await this.fileList.refresh(open, files);
     if ((!files.length && (!hasExternal || !route)) || !folders?.length) {
-      const marker = right?.tabs.find(isMarker);
+      const marker = right?.tabs.find(isExternalFileListTab);
       this.ownedGroup = undefined;
       if (marker && right) {
         const column = right.viewColumn;
@@ -170,7 +182,6 @@ export class TabManagementService implements vscode.Disposable {
         }
       }
     }
-    await this.directory.reconcile();
   }
 
   private async openMarker(): Promise<vscode.TabGroup | undefined> {

@@ -31,6 +31,7 @@ import {
   projectSymbols,
 } from './symbolModel';
 import { getSymbolOutlineHtml } from './webviewHtml';
+import { shellSymbols, supportsShell } from '../shell/shellNavigation';
 import { devicetreeNodes } from './devicetreeNodes';
 import { enhanceOutlineSymbols } from './outlineEnhancements';
 import { hasVscodeCommand } from '../platform/vscodeCapabilities';
@@ -214,6 +215,7 @@ export class SymbolOutlineViewProvider implements vscode.WebviewViewProvider, vs
     try {
       const result = document.languageId === 'dts'
         ? devicetreeNodes(document)
+        : supportsShell(document) ? await shellSymbols(document)
         : await vscode.commands.executeCommand<readonly (vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
           'vscode.executeDocumentSymbolProvider', uri,
         );
